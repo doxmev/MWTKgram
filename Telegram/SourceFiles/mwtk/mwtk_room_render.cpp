@@ -646,7 +646,7 @@ QImage RenderBranch(QSize size, double ratio) {
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
 	const auto w = double(size.width());
 	const auto h = double(size.height());
-	const auto needle = std::max(5., w * 0.022);
+	const auto needle = std::max(7., w * 0.05);
 	const auto drawNeedles = [&](QPointF from, QPointF till, double scale) {
 		const auto delta = till - from;
 		const auto length = std::hypot(delta.x(), delta.y());
@@ -655,7 +655,7 @@ QImage RenderBranch(QSize size, double ratio) {
 		}
 		const auto dir = delta / length;
 		const auto normal = QPointF(-dir.y(), dir.x());
-		const auto steps = int(length / 2.6);
+		const auto steps = int(length / 1.7);
 		for (auto i = 0; i <= steps; ++i) {
 			const auto t = double(i) / std::max(steps, 1);
 			const auto at = from + delta * t;
@@ -667,7 +667,7 @@ QImage RenderBranch(QSize size, double ratio) {
 				const auto lit = (side < 0.) ? 0.35 : 0.;
 				p.setPen(QPen(
 					Mix(QColor(4, 9, 6, 245), QColor(38, 58, 52, 245), lit * t),
-					std::max(1., needle * 0.16),
+					std::max(1.2, needle * 0.11),
 					Qt::SolidLine,
 					Qt::RoundCap));
 				p.drawLine(at, at + vector);
@@ -692,8 +692,8 @@ QImage RenderBranch(QSize size, double ratio) {
 		drawNeedles(previous, point, 1.2);
 		previous = point;
 	}
-	for (auto i = 0; i != 11; ++i) {
-		const auto t = 0.08 + i * 0.085;
+	for (auto i = 0; i != 16; ++i) {
+		const auto t = 0.06 + i * 0.058;
 		const auto from = bough(t);
 		const auto ahead = bough(std::min(1., t + 0.05));
 		const auto dir = ahead - from;
@@ -704,11 +704,14 @@ QImage RenderBranch(QSize size, double ratio) {
 		const auto rotated = QPointF(
 			unitDir.x() * std::cos(angle) - unitDir.y() * std::sin(angle),
 			unitDir.x() * std::sin(angle) + unitDir.y() * std::cos(angle));
-		const auto length = w * (0.26 - 0.15 * t) * (0.8 + 0.4 * unit(random));
+		const auto length = w * (0.3 - 0.18 * t) * (0.8 + 0.4 * unit(random));
 		const auto till = from + rotated * length + QPointF(0., length * 0.25);
 		p.setPen(QPen(QColor(10, 8, 6, 240), std::max(1., w * 0.005), Qt::SolidLine, Qt::RoundCap));
 		p.drawLine(from, till);
-		drawNeedles(from, till, 0.9);
+		drawNeedles(from, till, 0.95);
+		const auto twig = from + (till - from) * 0.5;
+		const auto twigEnd = twig + rotated * length * 0.35 + QPointF(side * length * 0.15, length * 0.2);
+		drawNeedles(twig, twigEnd, 0.7);
 	}
 	p.end();
 	return result;
