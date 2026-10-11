@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_actions.h"
 
+#include "mwtk/mwtk_notes.h"
+
 #include "api/api_blocked_peers.h"
 #include "api/api_chat_participants.h"
 #include "api/api_credits.h"
@@ -1715,6 +1717,21 @@ Section DetailsFiller::makeInfo() {
 			AboutWithAdvancedValue(user));
 		setupAboutContextMenu(about.text, AboutWithAdvancedValue(user));
 		SetupAboutPeerIdDrag(about.text, user);
+
+		{
+			const auto controller = _controller->parentController();
+			const auto note = addInfoLine(
+				rpl::single(QString::fromUtf8("Заметка MWTK")),
+				Mwtk::Notes::Value(user) | rpl::map(tr::marked));
+			note.text->setContextMenuHook([=, raw = note.text](
+					Ui::FlatLabel::ContextMenuRequest request) {
+				raw->fillContextMenu(request);
+				request.menu->addAction(
+					QString::fromUtf8("Изменить заметку MWTK"),
+					[=] { Mwtk::Notes::ShowEditBox(controller, user); },
+					&st::menuIconEdit);
+			});
+		}
 
 		const auto usernameLine = addInfoOneLine(
 			UsernamesSubtext(_peer, tr::lng_info_username_label()),

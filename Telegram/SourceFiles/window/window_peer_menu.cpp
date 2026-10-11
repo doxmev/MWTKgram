@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "mwtk/mwtk_notes.h"
+
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
 #include "menu/menu_mark_as_read.h"
@@ -336,6 +338,7 @@ private:
 	void addNewContact();
 	void addShareContact();
 	void addEditContact();
+	void addMwtkNote();
 	void addBotToGroup();
 	void addNewMembers();
 	void addDeleteContact();
@@ -1165,6 +1168,20 @@ void Filler::addEditContact() {
 		&st::menuIconEdit);
 }
 
+void Filler::addMwtkNote() {
+	if (_topic || _sublist || !_peer || _peer->isSelf()) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	_addAction(
+		(Mwtk::Notes::Get(peer).isEmpty()
+			? QString::fromUtf8("Добавить заметку MWTK")
+			: QString::fromUtf8("Изменить заметку MWTK")),
+		[=] { Mwtk::Notes::ShowEditBox(controller, peer); },
+		&st::menuIconEdit);
+}
+
 void Filler::addBotToGroup() {
 	const auto user = _peer->asUser();
 	if (!user) {
@@ -1939,6 +1956,7 @@ void Filler::fillHistoryActions() {
 	addToggleMuteSubmenu(true);
 	addCreateTopic();
 	addInfo();
+	addMwtkNote();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();
@@ -1964,6 +1982,7 @@ void Filler::fillProfileActions() {
 	addNewContact();
 	addShareContact();
 	addEditContact();
+	addMwtkNote();
 	addBotToGroup();
 	addNewMembers();
 	addSendGift();
