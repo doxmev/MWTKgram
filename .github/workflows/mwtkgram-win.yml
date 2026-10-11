@@ -229,6 +229,40 @@ jobs:
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
           key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
 
+      - name: Free disk space for the build.
+        shell: pwsh
+        run: |
+          function Report($label) {
+            $parts = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | ForEach-Object { "{0}: {1:N1} GB free" -f $_.Name, ($_.Free / 1GB) }
+            Write-Output ("::notice title=Disk {0}::{1}" -f $label, ($parts -join ', '))
+          }
+          Report "before"
+          $targets = @(
+            'C:\Android',
+            'C:\Program Files (x86)\Android',
+            'C:\hostedtoolcache\windows\CodeQL',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\ghcup',
+            'C:\Program Files\Microsoft SDKs\Azure',
+            'C:\Program Files\Azure Cosmos DB Emulator',
+            'C:\SeleniumWebDrivers',
+            'C:\tools\php'
+          )
+          foreach ($t in $targets) {
+            if (Test-Path $t) { cmd /c "rmdir /s /q `"$t`"" 2>$null }
+          }
+          $out = Join-Path $env:TBUILD (Join-Path $env:REPO_NAME 'out')
+          $d = Get-PSDrive -Name D -ErrorAction SilentlyContinue
+          $c = Get-PSDrive -Name C
+          if ($d -and $d.Free -gt $c.Free -and -not (Test-Path $out)) {
+            New-Item -ItemType Directory -Force -Path 'D:\mwtk_out' | Out-Null
+            cmd /c "mklink /J `"$out`" D:\mwtk_out"
+            Write-Output "::notice title=Build dir::out is on drive D"
+          }
+          Report "after"
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
