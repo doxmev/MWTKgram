@@ -51,6 +51,9 @@ private:
 	[[nodiscard]] QWidget *findHoveredButton() const;
 	void paintButtons(QPainter &p) const;
 	void paintFrame(QPainter &p) const;
+	void paintTrail(QPainter &p) const;
+	void pushTrailPoint();
+	[[nodiscard]] QRegion tickTrail();
 	void refreshFrameCache();
 
 	Scene _scene;
@@ -65,6 +68,14 @@ private:
 	bool _frameAnimated = false;
 	crl::time _frameDelay = 33;
 	ButtonState _button;
+
+	struct TrailPoint {
+		QPointF position;
+		crl::time at = 0;
+	};
+	bool _trailEnabled = false;
+	std::vector<TrailPoint> _trail;
+	QRect _trailDirty;
 
 	QImage _branch;
 	QSize _branchFor;

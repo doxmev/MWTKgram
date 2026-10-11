@@ -93,6 +93,13 @@ VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
 			[=](not_null<QEvent*> e) {
 				switch (e->type()) {
 				case QEvent::MouseMove:
+					if (_running && _trailEnabled) {
+						pushTrailPoint();
+					}
+					if (_running) {
+						wake();
+					}
+					break;
 				case QEvent::MouseButtonPress:
 				case QEvent::MouseButtonRelease:
 				case QEvent::Enter:
@@ -194,8 +201,20 @@ void VisualsWidget::refreshFromOptions() {
 	_buttons3d = effects && OptionValue(kOptionButtons3d);
 	_buttonsAnimated = effects && OptionValue(kOptionButtonsAnimated);
 	_frameEnabled = effects && OptionValue(kOptionUiScene);
+	_trailEnabled = effects && OptionValue(kOptionCursorTrail);
+	if (!_trailEnabled) {
+		_trail.clear();
+		if (!_trailDirty.isEmpty()) {
+			update(_trailDirty);
+			_trailDirty = QRect();
+		}
+	}
 	refreshFrameCache();
-	setRunning(_sceneEnabled || _buttons3d || _buttonsAnimated || _frameEnabled);
+	setRunning(_sceneEnabled
+		|| _buttons3d
+		|| _buttonsAnimated
+		|| _frameEnabled
+		|| _trailEnabled);
 	wake();
 	update();
 }
@@ -226,6 +245,7 @@ void VisualsWidget::tick() {
 	auto frameMoving = false;
 	if (_followOptions) {
 		dirty += tickButtons(dt);
+		dirty += tickTrail();
 		const auto frame = tickFrame(dt);
 		frameMoving = !frame.isEmpty();
 		dirty += frame;
@@ -233,9 +253,89 @@ void VisualsWidget::tick() {
 	if (!dirty.isEmpty()) {
 		update(dirty);
 	}
-	if (!scene && !frameMoving && buttonsSettled()) {
+	if (!scene && !frameMoving && buttonsSettled() && _trail.empty()) {
 		_timer.cancel();
 	}
+}
+
+void VisualsWidget::pushTrailPoint() {
+	const auto top = window();
+	if (!top || QApplication::activeWindow() != top) {
+		return;
+	}
+	const auto position = QPointF(mapFromGlobal(QCursor::pos()));
+	if (!rect().contains(position.toPoint())) {
+		return;
+	}
+	const auto now = crl::now();
+	if (!_trail.empty()) {
+		const auto delta = position - _trail.back().position;
+		if (std::abs(delta.x()) + std::abs(delta.y()) < 2.) {
+			_trail.back().at = now;
+			return;
+		}
+	}
+	_trail.push_back({ position, now });
+	if (_trail.size() > 48) {
+		_trail.erase(_trail.begin());
+	}
+}
+
+QRegion VisualsWidget::tickTrail() {
+	constexpr auto kLifetime = crl::time(320);
+	const auto now = crl::now();
+	_trail.erase(
+		std::remove_if(_trail.begin(), _trail.end(), [&](const TrailPoint &point) {
+			return now - point.at > kLifetime;
+		}),
+		_trail.end());
+	auto bounds = QRectF();
+	for (const auto &point : _trail) {
+		bounds = bounds.united(QRectF(point.position, QSizeF(1., 1.)));
+	}
+	const auto margin = int(std::ceil(12. * CurrentScale()));
+	const auto now_ = _trail.empty()
+		? QRect()
+		: bounds.toAlignedRect().marginsAdded({ margin, margin, margin, margin });
+	auto result = QRegion(_trailDirty);
+	if (!now_.isEmpty()) {
+		result += now_;
+	}
+	_trailDirty = now_;
+	return result;
+}
+
+void VisualsWidget::paintTrail(QPainter &p) const {
+	if (!_trailEnabled || _trail.size() < 2) {
+		return;
+	}
+	constexpr auto kLifetime = 320.;
+	const auto now = crl::now();
+	const auto palette = PaletteAt(OptionInt(kOptionPalette), _frameTime);
+	const auto scale = CurrentScale();
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	const auto count = int(_trail.size());
+	for (auto i = 1; i != count; ++i) {
+		const auto &from = _trail[i - 1];
+		const auto &till = _trail[i];
+		const auto age = std::clamp((now - till.at) / kLifetime, 0., 1.);
+		const auto order = double(i) / (count - 1);
+		const auto life = (1. - age) * order;
+		if (life <= 0.01) {
+			continue;
+		}
+		const auto color = QColor::fromRgbF(
+			float(palette.third.redF() * (1. - order) + palette.first.redF() * order),
+			float(palette.third.greenF() * (1. - order) + palette.first.greenF() * order),
+			float(palette.third.blueF() * (1. - order) + palette.first.blueF() * order));
+		const auto width = (1. + 4. * life) * scale;
+		p.setPen(QPen(WithAlpha(color, 0.22 * life), width * 3.2, Qt::SolidLine, Qt::RoundCap));
+		p.drawLine(from.position, till.position);
+		p.setPen(QPen(WithAlpha(color, 0.9 * life), width, Qt::SolidLine, Qt::RoundCap));
+		p.drawLine(from.position, till.position);
+	}
+	p.restore();
 }
 
 QWidget *VisualsWidget::findHoveredButton() const {
@@ -551,6 +651,7 @@ void VisualsWidget::paintEvent(QPaintEvent *e) {
 	if (_followOptions) {
 		paintFrame(p);
 		paintButtons(p);
+		paintTrail(p);
 	}
 }
 

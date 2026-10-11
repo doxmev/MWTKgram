@@ -42,6 +42,11 @@ extern const char kOptionSceneNotes[];
 extern const char kOptionBackgroundPhoto[];
 extern const char kOptionBackgroundVideo[];
 extern const char kOptionBackgroundDim[];
+extern const char kOptionCursorTrail[];
+
+inline constexpr auto kPresetCount = 5;
+[[nodiscard]] QString PresetName(int index);
+void ApplyPreset(int index);
 
 inline constexpr auto kBackgroundCount = 6;
 inline constexpr auto kSceneBaseCount = 3;

@@ -223,6 +223,13 @@ base::options::option<int> OptionBackgroundDim({
 	.defaultValue = 30,
 });
 
+base::options::toggle OptionCursorTrail({
+	.id = kOptionCursorTrail,
+	.name = "MWTKgram cursor trail",
+	.description = "Neon trail behind the mouse cursor.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -255,6 +262,7 @@ const char kOptionSceneNotes[] = "mwtk-scene-notes";
 const char kOptionBackgroundPhoto[] = "mwtk-background-photo";
 const char kOptionBackgroundVideo[] = "mwtk-background-video";
 const char kOptionBackgroundDim[] = "mwtk-background-dim";
+const char kOptionCursorTrail[] = "mwtk-cursor-trail";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -379,6 +387,88 @@ QString SceneTimeName(int index) {
 	return QString::fromUtf8("Ночь");
 }
 
+QString PresetName(int index) {
+	switch (index) {
+	case 0: return QString::fromUtf8("Хоррор");
+	case 1: return QString::fromUtf8("Синтвейв");
+	case 2: return QString::fromUtf8("Космос");
+	case 3: return QString::fromUtf8("Эконом");
+	case 4: return QString::fromUtf8("Максимум");
+	}
+	return QString();
+}
+
+void ApplyPreset(int index) {
+	OptionEffects.set(true);
+	switch (index) {
+	case 0: // Horror forest.
+		OptionPalette.set(0);
+		OptionRoom.set(1);
+		OptionQuality.set(1);
+		OptionVisuals.set(true);
+		OptionWatermark.set(true);
+		OptionObjects.set(false);
+		OptionParticles.set(true);
+		OptionIntensity.set(1);
+		OptionRoomMotion.set(true);
+		OptionBubblesOpacity.set(1);
+		break;
+	case 1: // Synthwave.
+		OptionPalette.set(1);
+		OptionRoom.set(2);
+		OptionQuality.set(1);
+		OptionVisuals.set(true);
+		OptionWatermark.set(true);
+		OptionObjects.set(true);
+		OptionParticles.set(true);
+		OptionIntensity.set(2);
+		OptionRoomMotion.set(false);
+		OptionBubblesOpacity.set(2);
+		break;
+	case 2: // Space.
+		OptionPalette.set(4);
+		OptionRoom.set(3);
+		OptionSceneBase.set(2);
+		OptionSceneDensity.set(70);
+		OptionSceneFog.set(60);
+		OptionQuality.set(1);
+		OptionVisuals.set(true);
+		OptionWatermark.set(true);
+		OptionObjects.set(true);
+		OptionParticles.set(true);
+		OptionIntensity.set(1);
+		OptionRoomMotion.set(false);
+		OptionBubblesOpacity.set(2);
+		break;
+	case 3: // Economy.
+		OptionQuality.set(0);
+		OptionRoom.set(0);
+		OptionVisuals.set(false);
+		OptionRoomMotion.set(false);
+		OptionButtonsAnimated.set(false);
+		OptionUiScene.set(false);
+		OptionCursorTrail.set(false);
+		OptionBackgroundAnimation.set(false);
+		break;
+	case 4: // Maximum.
+		OptionQuality.set(2);
+		OptionRoom.set(1);
+		OptionVisuals.set(true);
+		OptionWatermark.set(true);
+		OptionObjects.set(true);
+		OptionParticles.set(true);
+		OptionIntensity.set(2);
+		OptionRoomMotion.set(true);
+		OptionButtons3d.set(true);
+		OptionButtonsAnimated.set(true);
+		OptionUiScene.set(true);
+		OptionCursorTrail.set(true);
+		OptionBubbles3d.set(true);
+		OptionCards3d.set(true);
+		break;
+	}
+}
+
 QString BubbleOpacityName(int index) {
 	switch (index) {
 	case 0: return QString::fromUtf8("Плотные");
@@ -412,6 +502,7 @@ rpl::producer<> InterfaceConfigChanges() {
 		OptionUiScene.changes(),
 		OptionButtons3d.changes(),
 		OptionButtonsAnimated.changes(),
+		OptionCursorTrail.changes(),
 		OptionRoom.changes(),
 		OptionPalette.changes());
 }

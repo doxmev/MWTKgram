@@ -271,6 +271,75 @@ void AddSegmented(
 	}, picker->lifetime());
 }
 
+void AddPresetRow(not_null<Ui::VerticalLayout*> container) {
+	const auto count = ::Mwtk::kPresetCount;
+	const auto height = st::settingsButton.height;
+	const auto row = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::boxRowPadding);
+	row->resize(row->width(), height);
+	row->setCursor(style::cur_pointer);
+	struct State {
+		int flash = -1;
+		base::Timer timer;
+	};
+	const auto state = row->lifetime().make_state<State>();
+	state->timer.setCallback([=] {
+		state->flash = -1;
+		row->update();
+	});
+	const auto segment = [=](int index) {
+		const auto skip = height / 6;
+		const auto width = (row->width() - skip * (count - 1)) / std::max(count, 1);
+		return QRect(index * (width + skip), 0, width, height);
+	};
+	row->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(row);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto radius = height / 2.;
+		const auto palette = ::Mwtk::PaletteAt(
+			base::options::value<int>(::Mwtk::kOptionPalette),
+			0.);
+		p.setFont(st::semiboldFont);
+		for (auto i = 0; i != count; ++i) {
+			const auto rect = QRectF(segment(i)).marginsRemoved({ 1., 3., 1., 3. });
+			if (i == state->flash) {
+				auto gradient = QLinearGradient(rect.topLeft(), rect.topRight());
+				gradient.setColorAt(0., palette.first);
+				gradient.setColorAt(1., palette.third);
+				p.setPen(Qt::NoPen);
+				p.setBrush(gradient);
+			} else {
+				p.setPen(QPen(palette.first, 1.5));
+				p.setBrush(st::windowBgOver);
+			}
+			p.drawRoundedRect(rect, radius, radius);
+			p.setPen((i == state->flash)
+				? ((palette.first.lightnessF() > 0.7f)
+					? QColor(0, 0, 0)
+					: QColor(255, 255, 255))
+				: st::windowFg->c);
+			p.drawText(rect, Qt::AlignCenter, ::Mwtk::PresetName(i));
+		}
+	}, row->lifetime());
+	row->events(
+	) | rpl::filter([](not_null<QEvent*> e) {
+		return e->type() == QEvent::MouseButtonPress;
+	}) | rpl::on_next([=](not_null<QEvent*> e) {
+		const auto position = static_cast<QMouseEvent*>(e.get())->pos();
+		for (auto i = 0; i != count; ++i) {
+			if (segment(i).contains(position)) {
+				::Mwtk::ApplyPreset(i);
+				state->flash = i;
+				state->timer.callOnce(900);
+				row->update();
+				break;
+			}
+		}
+	}, row->lifetime());
+}
+
 void AddSlider(
 		not_null<Ui::VerticalLayout*> container,
 		const QString &title,
@@ -545,6 +614,9 @@ void MwtkSettings::setupContent() {
 
 	AddOptionToggle(window, content, Utf("Все эффекты MWTKgram (F9)"), ::Mwtk::kOptionEffects);
 	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Пресеты в один клик")));
+	AddPresetRow(content);
+	Ui::AddSkip(content);
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Качество графики")));
 	AddSegmented(content, ::Mwtk::kOptionQuality, {
 		::Mwtk::QualityName(0),
@@ -691,6 +763,7 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Интерфейс внутри 3D-сцены"), ::Mwtk::kOptionUiScene);
 	AddOptionToggle(window, content, Utf("Объёмные кнопки"), ::Mwtk::kOptionButtons3d);
 	AddOptionToggle(window, content, Utf("Анимация кнопок"), ::Mwtk::kOptionButtonsAnimated);
+	AddOptionToggle(window, content, Utf("Неоновый след за курсором"), ::Mwtk::kOptionCursorTrail);
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
