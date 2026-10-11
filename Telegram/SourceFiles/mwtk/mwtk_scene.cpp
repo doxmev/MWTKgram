@@ -59,14 +59,14 @@ const PaletteData kPalettes[] = {
 }
 
 [[nodiscard]] QImage BlurImage(const QImage &image, int factor) {
-	const auto small = image.scaled(
+	const auto reduced = image.scaled(
 		std::max(1, image.width() / factor),
 		std::max(1, image.height() / factor),
 		Qt::IgnoreAspectRatio,
 		Qt::SmoothTransformation);
-	const auto smaller = small.scaled(
-		std::max(1, small.width() / 2),
-		std::max(1, small.height() / 2),
+	const auto smaller = reduced.scaled(
+		std::max(1, reduced.width() / 2),
+		std::max(1, reduced.height() / 2),
 		Qt::IgnoreAspectRatio,
 		Qt::SmoothTransformation);
 	return smaller.scaled(
@@ -393,8 +393,8 @@ Scene::Projected Scene::project(const Body &body) const {
 		const auto t = Clamp((x - edge0) / (edge1 - edge0), 0., 1.);
 		return t * t * (3. - 2. * t);
 	};
-	const auto far = farPlane(body.kind);
-	const auto fadeIn = 1. - smooth(far - 0.8, far, body.z);
+	const auto farZ = farPlane(body.kind);
+	const auto fadeIn = 1. - smooth(farZ - 0.8, farZ, body.z);
 	const auto fadeOut = smooth(0.55, 1.05, body.z);
 	const auto depth = 0.55 + 0.45 * (1. - smooth(1., 4.2, body.z));
 	result.alpha = fadeIn * fadeOut * depth;
