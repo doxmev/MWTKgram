@@ -268,6 +268,13 @@ jobs:
           }
           Report "after"
 
+      - name: Configure pagefile.
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 48GB
+          disk-root: "D:"
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
@@ -285,7 +292,7 @@ jobs:
           %TDESKTOP_BUILD_DEFINE% > %TBUILD%\configure.log 2>&1
           if %errorlevel% neq 0 exit /b 1
 
-          cmake --build ..\out --config Release --parallel > %TBUILD%\build.log 2>&1
+          cmake --build ..\out --config Release --parallel 2 > %TBUILD%\build.log 2>&1
           if %errorlevel% neq 0 exit /b 1
 
       - name: Report build errors.
