@@ -230,6 +230,7 @@ base::options::toggle ViewProfileInChatsListContextMenu({
 	.id = kOptionViewProfileInChatsListContextMenu,
 	.name = "Add \"View Profile\"",
 	.description = "Add \"View Profile\" to context menu in chat list",
+	.defaultValue = true,
 });
 
 void SetActionText(not_null<QAction*> action, rpl::producer<QString> &&text) {

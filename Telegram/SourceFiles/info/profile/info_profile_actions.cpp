@@ -144,12 +144,14 @@ base::options::toggle ShowPeerIdBelowAbout({
 	.name = "Show Peer IDs in Profile",
 	.description = "Show peer IDs from API below their Bio / Description."
 		" Add contact IDs to exported data.",
+	.defaultValue = true,
 });
 
 base::options::toggle ShowChannelJoinedBelowAbout({
 	.id = kOptionShowChannelJoinedBelowAbout,
 	.name = "Show Channel Joined Date in Profile",
 	.description = "Show when you join Channel under its Description.",
+	.defaultValue = true,
 });
 
 [[nodiscard]] rpl::producer<TextWithEntities> UsernamesSubtext(

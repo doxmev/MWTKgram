@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwindow.h"
 
+#include "mwtk/mwtk_overlay.h"
+
 #include "data/data_document.h"
 #include "data/data_session.h"
 #include "data/data_document_media.h"
@@ -149,6 +151,8 @@ void MainWindow::finishFirstShow() {
 	}, lifetime());
 
 	setAttribute(Qt::WA_NoSystemBackground);
+
+	Mwtk::SetupOverlay(bodyWidget());
 
 	if (!_passcodeLock && !_setupEmailLock && _main) {
 		_main->activate();

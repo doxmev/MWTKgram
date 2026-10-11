@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "settings/sections/settings_main.h"
 
+#include "settings/settings_mwtk.h"
+
 #include "settings/settings_common_session.h"
 
 #include "api/api_cloud_password.h"
@@ -378,6 +380,18 @@ void BuildSectionButtons(SectionBuilder &builder) {
 			.keywords = { u"profile"_q, u"edit"_q, u"information"_q },
 		});
 	}
+
+	builder.addButton({
+		.title = rpl::single(u"MWTKgram"_q),
+		.icon = {
+			&st::menuIconPalette,
+			IconType::Rounded,
+			nullptr,
+			QBrush(QColor(0xd0, 0x10, 0x30)),
+		},
+		.onClick = [=] { showOther(MwtkSettings::Id()); },
+		.keywords = { u"mwtk"_q, u"doxmev"_q, u"visuals"_q },
+	});
 
 	builder.addSectionButton({
 		.title = tr::lng_settings_section_notify(),

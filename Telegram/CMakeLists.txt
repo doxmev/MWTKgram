@@ -1914,6 +1914,8 @@ PRIVATE
     settings/settings_credits_graphics.cpp
     settings/settings_credits_graphics.h
     settings/settings_experimental.cpp
+    settings/settings_mwtk.cpp
+    settings/settings_mwtk.h
     settings/settings_experimental.h
     settings/sections/settings_folders.cpp
     settings/sections/settings_folders.h
@@ -2348,6 +2350,12 @@ PRIVATE
     mainwidget.h
     mainwindow.cpp
     mainwindow.h
+    mwtk/mwtk_options.cpp
+    mwtk/mwtk_options.h
+    mwtk/mwtk_overlay.cpp
+    mwtk/mwtk_overlay.h
+    mwtk/mwtk_scene.cpp
+    mwtk/mwtk_scene.h
     settings.cpp
     settings.h
     stdafx.h
