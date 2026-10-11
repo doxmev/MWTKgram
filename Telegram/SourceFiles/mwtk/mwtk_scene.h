@@ -41,6 +41,7 @@ struct SceneConfig {
 	int palette = 0;
 	double opacity = 0.6;
 	double scale = 1.;
+	double density = 1.;
 	QString label = QStringLiteral("doxmev");
 };
 

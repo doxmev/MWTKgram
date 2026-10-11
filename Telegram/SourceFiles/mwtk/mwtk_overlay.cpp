@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtGui/QCursor>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QLinearGradient>
@@ -27,7 +28,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Mwtk {
 namespace {
 
-constexpr auto kFrameDelay = crl::time(16);
 constexpr auto kButtonGlow = 12;
 
 [[nodiscard]] double CurrentScale() {
@@ -74,9 +74,38 @@ VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
 		) | rpl::on_next([=] {
 			refreshFromOptions();
 		}, lifetime());
+		RoomRepaintRequests(
+		) | rpl::on_next([=] {
+			if (_frameEnabled) {
+				wake();
+			}
+		}, lifetime());
+		base::install_event_filter(
+			this,
+			QCoreApplication::instance(),
+			[=](not_null<QEvent*> e) {
+				switch (e->type()) {
+				case QEvent::MouseMove:
+				case QEvent::MouseButtonPress:
+				case QEvent::MouseButtonRelease:
+				case QEvent::Enter:
+				case QEvent::Leave:
+				case QEvent::WindowActivate:
+				case QEvent::WindowDeactivate:
+				case QEvent::ApplicationStateChange:
+					if (_running) {
+						wake();
+					}
+					break;
+				default:
+					break;
+				}
+				return base::EventFilterResult::Continue;
+			});
 		refreshFromOptions();
 	} else {
 		_sceneEnabled = true;
+		_frameDelay = CurrentQuality().frameDelay;
 	}
 }
 
@@ -92,21 +121,75 @@ void VisualsWidget::setRunning(bool running) {
 	_running = running;
 	setVisible(running);
 	if (running) {
-		_lastTick = crl::now();
-		_timer.callEach(kFrameDelay);
+		wake();
 	} else {
 		_timer.cancel();
 	}
 }
 
+void VisualsWidget::wake() {
+	if (!_running || _timer.isActive()) {
+		return;
+	}
+	_lastTick = crl::now();
+	_timer.callEach(_frameDelay);
+}
+
+bool VisualsWidget::sceneAllowed() const {
+	if (!_sceneEnabled) {
+		return false;
+	}
+	if (!_followOptions || OptionValue(kOptionBackgroundAnimation)) {
+		return true;
+	}
+	const auto top = window();
+	return top && (QApplication::activeWindow() == top);
+}
+
+bool VisualsWidget::buttonsSettled() const {
+	const auto &state = _button;
+	if (!state.ripples.empty()) {
+		return false;
+	}
+	const auto goalAlpha = state.target ? 1. : 0.;
+	if (std::abs(state.alpha - goalAlpha) > 0.004) {
+		return false;
+	}
+	const auto goalPress = state.pressed ? 1. : 0.;
+	if (std::abs(state.press - goalPress) > 0.004) {
+		return false;
+	}
+	if (state.target && state.alpha > 0.004) {
+		const auto goal = QRectF(QRect(
+			state.target->mapTo(parentWidget(), QPoint()),
+			state.target->size()));
+		const auto d = std::abs(goal.x() - state.rect.x())
+			+ std::abs(goal.y() - state.rect.y())
+			+ std::abs(goal.width() - state.rect.width())
+			+ std::abs(goal.height() - state.rect.height());
+		if (d > 0.5) {
+			return false;
+		}
+	}
+	return true;
+}
+
 void VisualsWidget::refreshFromOptions() {
+	const auto quality = CurrentQuality();
+	if (_frameDelay != quality.frameDelay) {
+		_frameDelay = quality.frameDelay;
+		_timer.cancel();
+	}
+	_frameAnimated = quality.decorativeMotion;
 	setConfig(CurrentConfig(CurrentScale()));
+	const auto effects = EffectsEnabled();
 	_sceneEnabled = VisualsEnabled();
-	_buttons3d = OptionValue(kOptionButtons3d);
-	_buttonsAnimated = OptionValue(kOptionButtonsAnimated);
-	_frameEnabled = OptionValue(kOptionUiScene);
+	_buttons3d = effects && OptionValue(kOptionButtons3d);
+	_buttonsAnimated = effects && OptionValue(kOptionButtonsAnimated);
+	_frameEnabled = effects && OptionValue(kOptionUiScene);
 	refreshFrameCache();
 	setRunning(_sceneEnabled || _buttons3d || _buttonsAnimated || _frameEnabled);
+	wake();
 	update();
 }
 
@@ -123,20 +206,28 @@ void VisualsWidget::tick() {
 	const auto dt = std::min((now - _lastTick) / 1000., 0.1);
 	_lastTick = now;
 	if (!canAnimate()) {
+		_timer.cancel();
 		return;
 	}
 	_frameTime += dt;
 	auto dirty = QRegion();
-	if (_sceneEnabled) {
+	const auto scene = sceneAllowed();
+	if (scene) {
 		_scene.advance(dt);
 		dirty += _scene.takeDirtyRegion();
 	}
+	auto frameMoving = false;
 	if (_followOptions) {
 		dirty += tickButtons(dt);
-		dirty += tickFrame(dt);
+		const auto frame = tickFrame(dt);
+		frameMoving = !frame.isEmpty();
+		dirty += frame;
 	}
 	if (!dirty.isEmpty()) {
 		update(dirty);
+	}
+	if (!scene && !frameMoving && buttonsSettled()) {
+		_timer.cancel();
 	}
 }
 
@@ -269,8 +360,8 @@ QRegion VisualsWidget::tickFrame(double) {
 	const auto moved = std::abs(was.x() - _frameShift.x())
 		+ std::abs(was.y() - _frameShift.y());
 	const auto room = CurrentRoom();
-	const auto animated = (room == RoomType::Neon)
-		|| OptionValue(kOptionRoomMotion);
+	const auto animated = _frameAnimated
+		&& ((room == RoomType::Neon) || OptionValue(kOptionRoomMotion));
 	if (moved < 0.0003 && !animated && !_frameRects.empty()) {
 		return QRegion();
 	}
@@ -317,7 +408,9 @@ void VisualsWidget::paintFrame(QPainter &p) const {
 		const auto shift = QPointF(
 			-_frameShift.x() * w * 0.12,
 			_frameShift.y() * h * 0.12);
-		const auto sway = std::sin(_frameTime * 0.6) * 2.;
+		const auto sway = _frameAnimated
+			? std::sin(_frameTime * 0.6) * 2.
+			: 0.;
 		const auto size = QSizeF(_branchFor);
 		p.setOpacity(0.95);
 		p.save();
@@ -339,7 +432,9 @@ void VisualsWidget::paintFrame(QPainter &p) const {
 		p.fillRect(QRectF(0, h * 0.84, w, h * 0.16), mist);
 	} else {
 		const auto edge = std::max(18., 26. * CurrentScale());
-		const auto pulse = 0.65 + 0.35 * std::sin(_frameTime * 1.4);
+		const auto pulse = _frameAnimated
+			? (0.65 + 0.35 * std::sin(_frameTime * 1.4))
+			: 0.8;
 		const auto glow = (room == RoomType::Neon)
 			? QColor(255, 47, 208)
 			: palette.first;

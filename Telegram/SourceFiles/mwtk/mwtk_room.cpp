@@ -6,12 +6,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mwtk/mwtk_room.h"
 
+#include "base/event_filter.h"
 #include "base/timer.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_scene.h"
 #include "ui/style/style_core_scale.h"
 
+#include <QtCore/QCoreApplication>
 #include <QtGui/QCursor>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
@@ -42,6 +45,7 @@ private:
 	[[nodiscard]] RoomParams currentParams() const;
 	void refresh();
 	void tick();
+	void wake();
 	void render(QSize size);
 
 	RoomType _type = RoomType::None;
@@ -66,7 +70,42 @@ RoomController::RoomController()
 	) | rpl::on_next([=] {
 		refresh();
 	}, _lifetime);
+	base::install_event_filter(
+		QCoreApplication::instance(),
+		[=](not_null<QEvent*> e) {
+			switch (e->type()) {
+			case QEvent::MouseMove:
+			case QEvent::WindowActivate:
+			case QEvent::ApplicationStateChange:
+				wake();
+				break;
+			case QEvent::KeyPress: {
+				const auto key = static_cast<QKeyEvent*>(e.get());
+				if (key->key() == Qt::Key_F9
+					&& !key->isAutoRepeat()
+					&& !(key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier))) {
+					crl::on_main([] { ToggleEffects(); });
+					return base::EventFilterResult::Cancel;
+				}
+			} break;
+			default:
+				break;
+			}
+			return base::EventFilterResult::Continue;
+		},
+		_lifetime);
 	refresh();
+}
+
+void RoomController::wake() {
+	if (_type == RoomType::None || _timer.isActive()) {
+		return;
+	}
+	if (!OptionValue(kOptionRoomParallax) && !OptionValue(kOptionRoomMotion)) {
+		return;
+	}
+	_lastTick = crl::now();
+	_timer.callEach(kTickDelay);
 }
 
 RoomController &RoomController::Instance() {
@@ -85,12 +124,15 @@ RoomParams RoomController::currentParams() const {
 	result.pitch = OptionInt(kOptionRoomPitch);
 	result.fov = OptionInt(kOptionRoomFov);
 	result.ratio = style::DevicePixelRatio();
+	const auto quality = CurrentQuality();
+	result.scale = quality.roomScale;
+	result.trees = quality.trees;
 	result.accent = PaletteAt(OptionInt(kOptionPalette), 0.).first;
 	return result;
 }
 
 void RoomController::refresh() {
-	const auto value = OptionInt(kOptionRoom);
+	const auto value = EffectsEnabled() ? OptionInt(kOptionRoom) : 0;
 	_type = (value == 1)
 		? RoomType::Forest
 		: (value == 2)
@@ -100,10 +142,7 @@ void RoomController::refresh() {
 		_timer.cancel();
 		_frame = RoomFrame();
 	} else {
-		if (!_timer.isActive()) {
-			_lastTick = crl::now();
-			_timer.callEach(kTickDelay);
-		}
+		wake();
 		if (!_wantedSize.isEmpty()) {
 			_renderTimer.callOnce(kParamsRenderDelay);
 		}
@@ -151,6 +190,7 @@ void RoomController::tick() {
 	_lastTick = now;
 	const auto window = QApplication::activeWindow();
 	if (!window) {
+		_timer.cancel();
 		return;
 	}
 	const auto motion = OptionValue(kOptionRoomMotion);
@@ -174,6 +214,8 @@ void RoomController::tick() {
 		+ std::abs(_shift.y() - was.y());
 	if (motion || moved > 0.0004) {
 		_repaints.fire({});
+	} else {
+		_timer.cancel();
 	}
 }
 

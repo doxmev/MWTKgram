@@ -229,7 +229,8 @@ void Scene::setConfig(const SceneConfig &config) {
 	const auto textChanged = (_config.label != config.label)
 		|| (_config.scale != config.scale)
 		|| (_config.palette != config.palette);
-	const auto scaleChanged = (_config.scale != config.scale);
+	const auto scaleChanged = (_config.scale != config.scale)
+		|| (_config.density != config.density);
 	_config = config;
 	if (textChanged) {
 		rebuildText();
@@ -361,9 +362,10 @@ void Scene::rebuildBodies() {
 		return;
 	}
 	const auto area = double(_size.width()) * _size.height();
-	const auto labels = int(Clamp(area / 120000., 5., 10.));
-	const auto objects = int(Clamp(area / 75000., 7., 16.));
-	const auto particles = int(Clamp(area / 12000., 30., 80.));
+	const auto density = Clamp(_config.density, 0.2, 1.);
+	const auto labels = int(Clamp(area / 120000., 5., 10.) * density + 0.5);
+	const auto objects = int(Clamp(area / 75000., 7., 16.) * density + 0.5);
+	const auto particles = int(Clamp(area / 12000., 30., 80.) * density + 0.5);
 	const int shapes[] = { 0, 1, 0, 2, 0, 3, 0, 1 };
 	auto add = [&](Kind kind, int count) {
 		for (auto i = 0; i != count; ++i) {

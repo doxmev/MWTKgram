@@ -128,6 +128,10 @@ private:
 
 };
 
+[[nodiscard]] double RenderRatio(const RoomParams &params) {
+	return std::max(0.2, params.ratio * std::clamp(params.scale, 0.3, 1.));
+}
+
 struct Tree {
 	double x = 0.;
 	double z = 0.;
@@ -453,7 +457,10 @@ void RenderForest(
 		double depth = 0.;
 	};
 	auto visible = std::vector<Visible>();
-	for (const auto &tree : ForestTrees()) {
+	const auto &trees = ForestTrees();
+	const auto limit = std::clamp(params.trees, 5, int(trees.size()));
+	for (auto index = 0; index != limit; ++index) {
+		const auto &tree = trees[index];
 		const auto camera3 = camera.toCamera({ tree.x, tree.height * 0.5, tree.z });
 		if (camera3.z < 0.4) {
 			continue;
@@ -483,10 +490,10 @@ void RenderForest(
 	const auto makeImage = [&] {
 		auto image = QImage(
 			QSize(
-				int(std::ceil(full.width() * params.ratio)),
-				int(std::ceil(full.height() * params.ratio))),
+				int(std::ceil(full.width() * RenderRatio(params))),
+				int(std::ceil(full.height() * RenderRatio(params)))),
 			QImage::Format_ARGB32_Premultiplied);
-		image.setDevicePixelRatio(params.ratio);
+		image.setDevicePixelRatio(RenderRatio(params));
 		image.fill(Qt::transparent);
 		return image;
 	};
@@ -550,10 +557,10 @@ void RenderNeon(
 	frame.fog = QColor(20, 6, 34);
 	auto image = QImage(
 		QSize(
-			int(std::ceil(full.width() * params.ratio)),
-			int(std::ceil(full.height() * params.ratio))),
+			int(std::ceil(full.width() * RenderRatio(params))),
+			int(std::ceil(full.height() * RenderRatio(params)))),
 		QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(params.ratio);
+	image.setDevicePixelRatio(RenderRatio(params));
 	auto p = QPainter(&image);
 	p.setRenderHint(QPainter::Antialiasing);
 	auto background = QLinearGradient(0, 0, 0, full.height());
@@ -732,6 +739,34 @@ RoomFrame RenderRoom(const RoomParams &params, QSize size) {
 	} else {
 		RenderNeon(result, params, camera, full);
 	}
+	const auto target = QSize(
+		int(std::ceil(full.width() * params.ratio)),
+		int(std::ceil(full.height() * params.ratio)));
+	for (auto &layer : result.layers) {
+		if (layer.image.size() != target) {
+			layer.image = layer.image.scaled(
+				target,
+				Qt::IgnoreAspectRatio,
+				Qt::SmoothTransformation);
+			layer.image.setDevicePixelRatio(params.ratio);
+		}
+	}
+	result.vignette = QImage(
+		QSize(
+			int(std::ceil(size.width() * params.ratio)),
+			int(std::ceil(size.height() * params.ratio))),
+		QImage::Format_ARGB32_Premultiplied);
+	result.vignette.setDevicePixelRatio(params.ratio);
+	result.vignette.fill(Qt::transparent);
+	{
+		auto p = QPainter(&result.vignette);
+		const auto center = QPointF(size.width() / 2., size.height() / 2.);
+		const auto radius = std::hypot(size.width(), size.height()) * 0.62;
+		auto vignette = QRadialGradient(center, radius);
+		vignette.setColorAt(0.55, QColor(0, 0, 0, 0));
+		vignette.setColorAt(1., QColor(0, 0, 0, 150));
+		p.fillRect(QRectF(QPointF(), QSizeF(size)), vignette);
+	}
 	return result;
 }
 
@@ -759,8 +794,8 @@ void PaintRoomFrame(
 		auto offset = QPointF();
 		if (layer.depth > 0.) {
 			offset = QPointF(
-				Clamp(-cameraShift.x() * frame.focal / layer.depth, -margin, margin),
-				Clamp(cameraShift.y() * frame.focal / layer.depth, -margin, margin));
+				std::round(Clamp(-cameraShift.x() * frame.focal / layer.depth, -margin, margin)),
+				std::round(Clamp(cameraShift.y() * frame.focal / layer.depth, -margin, margin)));
 		}
 		const auto target = QRectF(
 			offset.x() - margin,
@@ -791,12 +826,9 @@ void PaintRoomFrame(
 			p.restore();
 		}
 	}
-	const auto center = QPointF(frame.size.width() / 2., frame.size.height() / 2.);
-	const auto radius = std::hypot(frame.size.width(), frame.size.height()) * 0.62;
-	auto vignette = QRadialGradient(center, radius);
-	vignette.setColorAt(0.55, QColor(0, 0, 0, 0));
-	vignette.setColorAt(1., QColor(0, 0, 0, 150));
-	p.fillRect(QRectF(QPointF(), QSizeF(frame.size)), vignette);
+	if (!frame.vignette.isNull()) {
+		p.drawImage(QRectF(QPointF(), QSizeF(frame.size)), frame.vignette);
+	}
 	p.restore();
 }
 

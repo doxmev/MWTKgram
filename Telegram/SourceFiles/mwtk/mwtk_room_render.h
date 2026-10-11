@@ -30,6 +30,8 @@ struct RoomParams {
 	double pitch = 0.;
 	double fov = 75.;
 	double ratio = 1.;
+	double scale = 1.;
+	int trees = 460;
 	QColor accent;
 
 	friend inline bool operator==(
@@ -40,6 +42,8 @@ struct RoomParams {
 			&& (a.pitch == b.pitch)
 			&& (a.fov == b.fov)
 			&& (a.ratio == b.ratio)
+			&& (a.scale == b.scale)
+			&& (a.trees == b.trees)
 			&& (a.accent == b.accent);
 	}
 };
@@ -55,6 +59,7 @@ struct RoomFrame {
 	int margin = 0;
 	double focal = 1.;
 	QColor fog;
+	QImage vignette;
 };
 
 [[nodiscard]] RoomFrame RenderRoom(const RoomParams &params, QSize size);

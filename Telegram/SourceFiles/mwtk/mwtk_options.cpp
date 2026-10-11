@@ -94,7 +94,28 @@ base::options::toggle OptionRoomMotion({
 	.id = kOptionRoomMotion,
 	.name = "MWTKgram room motion",
 	.description = "Camera sway and drifting fog.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionEffects({
+	.id = kOptionEffects,
+	.name = "MWTKgram effects",
+	.description = "Master switch for all MWTKgram effects (F9).",
 	.defaultValue = true,
+});
+
+base::options::option<int> OptionQuality({
+	.id = kOptionQuality,
+	.name = "MWTKgram graphics quality",
+	.description = "Frame rate and scene detail.",
+	.defaultValue = 1,
+});
+
+base::options::toggle OptionBackgroundAnimation({
+	.id = kOptionBackgroundAnimation,
+	.name = "MWTKgram background animation",
+	.description = "Keep animating while the window is not active.",
+	.defaultValue = false,
 });
 
 base::options::toggle OptionUiScene({
@@ -135,6 +156,25 @@ const char kOptionRoomMotion[] = "mwtk-room-motion";
 const char kOptionUiScene[] = "mwtk-ui-scene";
 const char kOptionButtons3d[] = "mwtk-buttons-3d";
 const char kOptionButtonsAnimated[] = "mwtk-buttons-animated";
+const char kOptionQuality[] = "mwtk-quality";
+const char kOptionEffects[] = "mwtk-effects";
+const char kOptionBackgroundAnimation[] = "mwtk-background-animation";
+
+QString QualityName(int index) {
+	switch (index) {
+	case 0: return QString::fromUtf8("Низкое");
+	case 2: return QString::fromUtf8("Высокое");
+	}
+	return QString::fromUtf8("Среднее");
+}
+
+Quality CurrentQuality() {
+	switch (std::clamp(OptionQuality.value(), 0, kQualityCount - 1)) {
+	case 0: return { 50, 0.45, 0.5, 160, false };
+	case 2: return { 16, 1., 1., 460, true };
+	}
+	return { 33, 0.75, 0.7, 300, false };
+}
 
 QString IntensityName(int index) {
 	switch (index) {
@@ -152,8 +192,17 @@ double IntensityOpacity(int index) {
 	return 0.55;
 }
 
+bool EffectsEnabled() {
+	return OptionEffects.value();
+}
+
+void ToggleEffects() {
+	OptionEffects.set(!OptionEffects.value());
+}
+
 bool VisualsEnabled() {
-	return OptionVisuals.value()
+	return OptionEffects.value()
+		&& OptionVisuals.value()
 		&& (OptionWatermark.value()
 			|| OptionObjects.value()
 			|| OptionParticles.value());
@@ -168,11 +217,15 @@ SceneConfig CurrentConfig(double scale) {
 	result.opacity = IntensityOpacity(
 		std::clamp(OptionIntensity.value(), 0, kIntensityCount - 1));
 	result.scale = scale;
+	result.density = CurrentQuality().density;
 	return result;
 }
 
 rpl::producer<> ConfigChanges() {
 	return rpl::merge(
+		OptionEffects.changes(),
+		OptionQuality.changes(),
+		OptionBackgroundAnimation.changes(),
 		OptionVisuals.changes(),
 		OptionWatermark.changes(),
 		OptionObjects.changes(),
@@ -183,17 +236,20 @@ rpl::producer<> ConfigChanges() {
 
 rpl::producer<> RoomConfigChanges() {
 	return rpl::merge(
+		OptionEffects.changes(),
 		OptionRoom.changes(),
 		OptionRoomYaw.changes(),
 		OptionRoomPitch.changes(),
 		OptionRoomFov.changes(),
 		OptionRoomParallax.changes(),
 		OptionRoomMotion.changes(),
+		OptionQuality.changes(),
 		OptionPalette.changes());
 }
 
 rpl::producer<> InterfaceConfigChanges() {
 	return rpl::merge(
+		OptionEffects.changes(),
 		OptionUiScene.changes(),
 		OptionButtons3d.changes(),
 		OptionButtonsAnimated.changes(),

@@ -432,6 +432,23 @@ void MwtkSettings::setupContent() {
 	AddPreview(content);
 	Ui::AddSkip(content);
 
+	AddOptionToggle(window, content, Utf("Все эффекты MWTKgram (F9)"), ::Mwtk::kOptionEffects);
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Качество графики")));
+	AddSegmented(content, ::Mwtk::kOptionQuality, {
+		::Mwtk::QualityName(0),
+		::Mwtk::QualityName(1),
+		::Mwtk::QualityName(2),
+	});
+	Ui::AddSkip(content);
+	AddOptionToggle(window, content, Utf("Анимация, когда окно не активно"), ::Mwtk::kOptionBackgroundAnimation);
+	Ui::AddSkip(content);
+	Ui::AddDividerText(
+		content,
+		rpl::producer<QString>(rpl::single(Utf("Низкое — меньше всего нагрузки на процессор. "
+			"F9 мгновенно выключает и включает все эффекты."))));
+	Ui::AddSkip(content);
+
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Визуалы")));
 	AddOptionToggle(window, content, Utf("Включить визуалы"), ::Mwtk::kOptionVisuals);
 	AddOptionToggle(window, content, Utf("Включить надпись doxmev"), ::Mwtk::kOptionWatermark);

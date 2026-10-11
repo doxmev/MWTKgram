@@ -41,8 +41,11 @@ private:
 	};
 
 	void tick();
+	void wake();
 	void refreshFromOptions();
 	[[nodiscard]] bool canAnimate() const;
+	[[nodiscard]] bool sceneAllowed() const;
+	[[nodiscard]] bool buttonsSettled() const;
 	[[nodiscard]] QRegion tickButtons(double dt);
 	[[nodiscard]] QRegion tickFrame(double dt);
 	[[nodiscard]] QWidget *findHoveredButton() const;
@@ -59,6 +62,8 @@ private:
 	bool _buttons3d = false;
 	bool _buttonsAnimated = false;
 	bool _frameEnabled = false;
+	bool _frameAnimated = false;
+	crl::time _frameDelay = 33;
 	ButtonState _button;
 
 	QImage _branch;
