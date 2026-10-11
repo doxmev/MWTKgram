@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/media/info_media_list_widget.h"
 
+#include "mwtk/mwtk_playlists.h"
+
 #include "info/global_media/info_global_media_provider.h"
 #include "info/media/info_media_common.h"
 #include "info/media/info_media_provider.h"
@@ -1540,6 +1542,13 @@ void ListWidget::showContextMenu(
 						: tr::lng_context_show_in_folder(tr::now)),
 					std::move(handler),
 					&st::menuIconShowInFolder);
+			}
+			if (document->isAudioFile()) {
+				const auto window = _controller->parentController();
+				const auto itemId = item->fullId();
+				_contextMenu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+					Mwtk::Playlists::ShowAddToPlaylistBox(window, itemId);
+				}, &st::menuIconAddToFolder);
 			}
 			if (_provider->allowSaveFileAs(item, document)) {
 				HistoryView::AddSaveDocumentAction(

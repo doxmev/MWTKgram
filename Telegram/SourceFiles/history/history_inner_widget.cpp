@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "mwtk/mwtk_playlists.h"
+
 #include "api/api_polls.h"
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "core/application.h"
@@ -3115,6 +3117,11 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 					saveContextGif(itemId);
 				}, &st::menuIconGif);
 			}
+		}
+		if (item && document->isAudioFile()) {
+			_menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+				Mwtk::Playlists::ShowAddToPlaylistBox(controller, itemId);
+			}, &st::menuIconAddToFolder);
 		}
 		if (!document->filepath(true).isEmpty()) {
 			_menu->addAction(Platform::IsMac() ? tr::lng_context_show_in_finder(tr::now) : tr::lng_context_show_in_folder(tr::now), [=] {
