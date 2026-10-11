@@ -9,7 +9,13 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
+#include "mwtk/mwtk_sounds.h"
 #include "mwtk/mwtk_style.h"
+#include "core/application.h"
+#include "data/data_session.h"
+#include "history/history_item.h"
+#include "main/main_domain.h"
+#include "main/main_session.h"
 #include "ui/abstract_button.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
@@ -25,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 #include <cmath>
+#include <random>
 
 namespace Mwtk {
 namespace {
@@ -202,6 +209,7 @@ void VisualsWidget::refreshFromOptions() {
 	_buttonsAnimated = effects && OptionValue(kOptionButtonsAnimated);
 	_frameEnabled = effects && OptionValue(kOptionUiScene);
 	_trailEnabled = effects && OptionValue(kOptionCursorTrail);
+	_burstEnabled = effects && OptionValue(kOptionSendEffect);
 	if (!_trailEnabled) {
 		_trail.clear();
 		if (!_trailDirty.isEmpty()) {
@@ -214,7 +222,8 @@ void VisualsWidget::refreshFromOptions() {
 		|| _buttons3d
 		|| _buttonsAnimated
 		|| _frameEnabled
-		|| _trailEnabled);
+		|| _trailEnabled
+		|| _burstEnabled);
 	wake();
 	update();
 }
@@ -246,6 +255,7 @@ void VisualsWidget::tick() {
 	if (_followOptions) {
 		dirty += tickButtons(dt);
 		dirty += tickTrail();
+		dirty += tickBurst(dt);
 		const auto frame = tickFrame(dt);
 		frameMoving = !frame.isEmpty();
 		dirty += frame;
@@ -253,9 +263,119 @@ void VisualsWidget::tick() {
 	if (!dirty.isEmpty()) {
 		update(dirty);
 	}
-	if (!scene && !frameMoving && buttonsSettled() && _trail.empty()) {
+	if (!scene
+		&& !frameMoving
+		&& buttonsSettled()
+		&& _trail.empty()
+		&& _sparks.empty()
+		&& _shocks.empty()) {
 		_timer.cancel();
 	}
+}
+
+void VisualsWidget::burst(QPointF at) {
+	if (!_burstEnabled || !_running) {
+		return;
+	}
+	static auto random = std::mt19937(777);
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+	const auto scale = CurrentScale();
+	constexpr auto kPi = 3.14159265358979323846;
+	for (auto i = 0; i != 26; ++i) {
+		const auto angle = (i < 18)
+			? (-kPi * (0.1 + 0.8 * unit(random)))
+			: (unit(random) * 2. * kPi);
+		const auto speed = (140. + 280. * unit(random)) * scale;
+		_sparks.push_back({
+			.position = at,
+			.velocity = QPointF(std::cos(angle), std::sin(angle)) * speed,
+			.life = 0.75 + 0.25 * unit(random),
+			.size = (1.8 + 2.6 * unit(random)) * scale,
+			.color = i % 3,
+		});
+	}
+	if (_sparks.size() > 200) {
+		_sparks.erase(_sparks.begin(), _sparks.begin() + (_sparks.size() - 200));
+	}
+	_shocks.push_back({ at, 0. });
+	wake();
+}
+
+QRegion VisualsWidget::tickBurst(double dt) {
+	if (_sparks.empty() && _shocks.empty() && _burstDirty.isEmpty()) {
+		return QRegion();
+	}
+	const auto scale = CurrentScale();
+	const auto drag = std::exp(-dt * 1.8);
+	for (auto &spark : _sparks) {
+		spark.life -= dt / 0.9;
+		spark.velocity *= drag;
+		spark.velocity.ry() += 520. * scale * dt;
+		spark.position += spark.velocity * dt;
+	}
+	_sparks.erase(
+		std::remove_if(_sparks.begin(), _sparks.end(), [](const Spark &spark) {
+			return spark.life <= 0.;
+		}),
+		_sparks.end());
+	for (auto &shock : _shocks) {
+		shock.progress += dt / 0.45;
+	}
+	_shocks.erase(
+		std::remove_if(_shocks.begin(), _shocks.end(), [](const Shock &shock) {
+			return shock.progress >= 1.;
+		}),
+		_shocks.end());
+	auto bounds = QRectF();
+	for (const auto &spark : _sparks) {
+		const auto r = spark.size * 3.5;
+		bounds = bounds.united(QRectF(
+			spark.position - QPointF(r, r),
+			QSizeF(2 * r, 2 * r)));
+	}
+	for (const auto &shock : _shocks) {
+		const auto r = 50. * scale + 4.;
+		bounds = bounds.united(QRectF(
+			shock.center - QPointF(r, r),
+			QSizeF(2 * r, 2 * r)));
+	}
+	const auto now = bounds.isEmpty()
+		? QRect()
+		: bounds.toAlignedRect().marginsAdded({ 2, 2, 2, 2 });
+	auto result = QRegion(_burstDirty);
+	if (!now.isEmpty()) {
+		result += now;
+	}
+	_burstDirty = now;
+	return result;
+}
+
+void VisualsWidget::paintBurst(QPainter &p) const {
+	if (_sparks.empty() && _shocks.empty()) {
+		return;
+	}
+	const auto palette = PaletteAt(OptionInt(kOptionPalette), _frameTime);
+	const QColor colors[] = { palette.first, palette.second, palette.third };
+	const auto scale = CurrentScale();
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	for (const auto &shock : _shocks) {
+		const auto radius = (8. + 42. * shock.progress) * scale;
+		const auto alpha = 0.7 * (1. - shock.progress);
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(WithAlpha(palette.first, alpha), 2.5 * scale * (1. - shock.progress) + 0.5));
+		p.drawEllipse(shock.center, radius, radius);
+	}
+	p.setPen(Qt::NoPen);
+	for (const auto &spark : _sparks) {
+		const auto life = std::clamp(spark.life, 0., 1.);
+		const auto &color = colors[spark.color];
+		p.setBrush(WithAlpha(color, 0.22 * life));
+		p.drawEllipse(spark.position, spark.size * 3., spark.size * 3.);
+		p.setBrush(WithAlpha(color, 0.95 * life));
+		p.drawEllipse(spark.position, spark.size, spark.size);
+	}
+	p.restore();
 }
 
 void VisualsWidget::pushTrailPoint() {
@@ -652,6 +772,7 @@ void VisualsWidget::paintEvent(QPaintEvent *e) {
 		paintFrame(p);
 		paintButtons(p);
 		paintTrail(p);
+		paintBurst(p);
 	}
 }
 
@@ -672,6 +793,34 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 		return base::EventFilterResult::Continue;
 	});
 	overlay->raise();
+
+	Sounds::Setup();
+	Core::App().domain().activeSessionValue(
+	) | rpl::map([](Main::Session *session) {
+		return session
+			? session->data().newItemAdded()
+			: rpl::never<not_null<HistoryItem*>>();
+	}) | rpl::flatten_latest(
+	) | rpl::filter([](not_null<HistoryItem*> item) {
+		return item->out() && item->isSending();
+	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		const auto parent = overlay->parentWidget();
+		const auto scale = CurrentScale();
+		auto at = QPointF(
+			overlay->width() - 60. * scale,
+			overlay->height() - 40. * scale);
+		const auto focus = QApplication::focusWidget();
+		if (parent && focus && parent->isAncestorOf(focus)) {
+			const auto rect = QRect(
+				focus->mapTo(parent, QPoint()),
+				focus->size());
+			at = QPointF(
+				rect.x() + rect.width() - 30. * scale,
+				rect.y() + rect.height() / 2.);
+		}
+		overlay->burst(at);
+		Sounds::Play(Sounds::Sound::Send);
+	}, overlay->lifetime());
 }
 
 } // namespace Mwtk

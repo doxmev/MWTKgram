@@ -230,6 +230,27 @@ base::options::toggle OptionCursorTrail({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionUiSounds({
+	.id = kOptionUiSounds,
+	.name = "MWTKgram interface sounds",
+	.description = "Soft sounds for clicks, sending and F9.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionUiSoundsVolume({
+	.id = kOptionUiSoundsVolume,
+	.name = "MWTKgram interface sounds volume",
+	.description = "Volume of the interface sounds, percent.",
+	.defaultValue = 30,
+});
+
+base::options::toggle OptionSendEffect({
+	.id = kOptionSendEffect,
+	.name = "MWTKgram send effect",
+	.description = "Particle burst when a message is sent.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -263,6 +284,9 @@ const char kOptionBackgroundPhoto[] = "mwtk-background-photo";
 const char kOptionBackgroundVideo[] = "mwtk-background-video";
 const char kOptionBackgroundDim[] = "mwtk-background-dim";
 const char kOptionCursorTrail[] = "mwtk-cursor-trail";
+const char kOptionUiSounds[] = "mwtk-ui-sounds";
+const char kOptionUiSoundsVolume[] = "mwtk-ui-sounds-volume";
+const char kOptionSendEffect[] = "mwtk-send-effect";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -448,6 +472,7 @@ void ApplyPreset(int index) {
 		OptionButtonsAnimated.set(false);
 		OptionUiScene.set(false);
 		OptionCursorTrail.set(false);
+		OptionSendEffect.set(false);
 		OptionBackgroundAnimation.set(false);
 		break;
 	case 4: // Maximum.
@@ -463,6 +488,7 @@ void ApplyPreset(int index) {
 		OptionButtonsAnimated.set(true);
 		OptionUiScene.set(true);
 		OptionCursorTrail.set(true);
+		OptionSendEffect.set(true);
 		OptionBubbles3d.set(true);
 		OptionCards3d.set(true);
 		break;
@@ -503,6 +529,7 @@ rpl::producer<> InterfaceConfigChanges() {
 		OptionButtons3d.changes(),
 		OptionButtonsAnimated.changes(),
 		OptionCursorTrail.changes(),
+		OptionSendEffect.changes(),
 		OptionRoom.changes(),
 		OptionPalette.changes());
 }

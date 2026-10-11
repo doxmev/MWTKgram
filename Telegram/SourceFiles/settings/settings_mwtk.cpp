@@ -764,6 +764,9 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Объёмные кнопки"), ::Mwtk::kOptionButtons3d);
 	AddOptionToggle(window, content, Utf("Анимация кнопок"), ::Mwtk::kOptionButtonsAnimated);
 	AddOptionToggle(window, content, Utf("Неоновый след за курсором"), ::Mwtk::kOptionCursorTrail);
+	AddOptionToggle(window, content, Utf("Вспышка частиц при отправке"), ::Mwtk::kOptionSendEffect);
+	AddOptionToggle(window, content, Utf("Звуки интерфейса"), ::Mwtk::kOptionUiSounds);
+	AddSlider(content, Utf("Громкость звуков"), ::Mwtk::kOptionUiSoundsVolume, 1, 100, Utf("%"));
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);

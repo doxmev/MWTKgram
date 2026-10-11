@@ -20,6 +20,7 @@ public:
 
 	void setConfig(const SceneConfig &config);
 	void setRunning(bool running);
+	void burst(QPointF at);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -52,6 +53,8 @@ private:
 	void paintButtons(QPainter &p) const;
 	void paintFrame(QPainter &p) const;
 	void paintTrail(QPainter &p) const;
+	void paintBurst(QPainter &p) const;
+	[[nodiscard]] QRegion tickBurst(double dt);
 	void pushTrailPoint();
 	[[nodiscard]] QRegion tickTrail();
 	void refreshFrameCache();
@@ -76,6 +79,22 @@ private:
 	bool _trailEnabled = false;
 	std::vector<TrailPoint> _trail;
 	QRect _trailDirty;
+
+	struct Spark {
+		QPointF position;
+		QPointF velocity;
+		double life = 1.;
+		double size = 2.;
+		int color = 0;
+	};
+	struct Shock {
+		QPointF center;
+		double progress = 0.;
+	};
+	bool _burstEnabled = false;
+	std::vector<Spark> _sparks;
+	std::vector<Shock> _shocks;
+	QRect _burstDirty;
 
 	QImage _branch;
 	QSize _branchFor;

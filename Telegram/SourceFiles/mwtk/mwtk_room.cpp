@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/clip/media_clip_reader.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_scene.h"
+#include "mwtk/mwtk_sounds.h"
 #include "ui/style/style_core_scale.h"
 
 #include <QtCore/QCoreApplication>
@@ -103,7 +104,16 @@ RoomController::RoomController()
 				if (key->key() == Qt::Key_F9
 					&& !key->isAutoRepeat()
 					&& !(key->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::ShiftModifier))) {
-					crl::on_main([] { ToggleEffects(); });
+					crl::on_main([] {
+						const auto was = EffectsEnabled();
+						if (was) {
+							Sounds::Play(Sounds::Sound::Toggle);
+						}
+						ToggleEffects();
+						if (!was) {
+							Sounds::Play(Sounds::Sound::Toggle);
+						}
+					});
 					return base::EventFilterResult::Cancel;
 				}
 			} break;

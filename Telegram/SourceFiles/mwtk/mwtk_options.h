@@ -43,6 +43,9 @@ extern const char kOptionBackgroundPhoto[];
 extern const char kOptionBackgroundVideo[];
 extern const char kOptionBackgroundDim[];
 extern const char kOptionCursorTrail[];
+extern const char kOptionUiSounds[];
+extern const char kOptionUiSoundsVolume[];
+extern const char kOptionSendEffect[];
 
 inline constexpr auto kPresetCount = 5;
 [[nodiscard]] QString PresetName(int index);

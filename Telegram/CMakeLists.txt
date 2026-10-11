@@ -2364,6 +2364,8 @@ PRIVATE
     mwtk/mwtk_scene.h
     mwtk/mwtk_playlists.cpp
     mwtk/mwtk_playlists.h
+    mwtk/mwtk_sounds.cpp
+    mwtk/mwtk_sounds.h
     mwtk/mwtk_style.cpp
     mwtk/mwtk_style.h
     settings.cpp
