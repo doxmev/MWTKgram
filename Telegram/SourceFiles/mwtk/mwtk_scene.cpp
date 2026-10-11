@@ -235,6 +235,7 @@ void Scene::setConfig(const SceneConfig &config) {
 		rebuildText();
 	}
 	if (scaleChanged) {
+		rebuildLabels();
 		rebuildObjects();
 		rebuildParticles();
 	}
@@ -246,6 +247,7 @@ void Scene::resize(QSize size) {
 	}
 	_size = size;
 	rebuildText();
+	rebuildLabels();
 	rebuildObjects();
 	rebuildParticles();
 }
@@ -267,9 +269,9 @@ void Scene::rebuildText() {
 	}
 	const auto shortest = std::min(_size.width(), _size.height());
 	const auto pixel = int(Clamp(
-		shortest * 0.13,
-		26. * _config.scale,
-		84. * _config.scale));
+		shortest * 0.032,
+		14. * _config.scale,
+		24. * _config.scale));
 	auto font = QFont(QStringLiteral("Segoe UI"));
 	font.setPixelSize(pixel);
 	font.setWeight(QFont::Black);
@@ -282,7 +284,7 @@ void Scene::rebuildText() {
 	_textBounds = _textPath.boundingRect();
 
 	const auto palette = PaletteAt(_config.palette, 0.);
-	const auto margin = int(std::ceil(pixel * 0.55));
+	const auto margin = int(std::ceil(pixel * 0.7));
 	const auto glowRect = _textBounds.toAlignedRect().marginsAdded(
 		{ margin, margin, margin, margin });
 	auto glow = QImage(glowRect.size(), QImage::Format_ARGB32_Premultiplied);
@@ -298,7 +300,7 @@ void Scene::rebuildText() {
 		p.setBrush(color);
 		p.drawPath(_textPath);
 	}
-	_textGlow = BlurImage(glow, std::max(2, pixel / 9));
+	_textGlow = BlurImage(glow, std::max(2, pixel / 6));
 	_textGlowOffset = glowRect.topLeft();
 	_textGlowPalette = _config.palette;
 }
@@ -309,17 +311,17 @@ void Scene::rebuildObjects() {
 		return;
 	}
 	const auto area = double(_size.width()) * _size.height();
-	const auto count = int(Clamp(area / 170000., 3., 6.));
+	const auto count = int(Clamp(area / 220000., 2., 5.));
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
 	for (auto i = 0; i != count; ++i) {
 		auto object = Object();
 		object.shape = i % int(_shapes.size());
-		object.radius = (46. + 38. * unit(_random)) * _config.scale;
+		object.radius = (22. + 18. * unit(_random)) * _config.scale;
 		object.position = QPointF(
 			object.radius + unit(_random) * std::max(1., _size.width() - 2 * object.radius),
 			object.radius + unit(_random) * std::max(1., _size.height() - 2 * object.radius));
 		const auto angle = unit(_random) * 2. * kPi;
-		const auto speed = (16. + 18. * unit(_random)) * _config.scale;
+		const auto speed = (12. + 14. * unit(_random)) * _config.scale;
 		object.velocity = QPointF(
 			std::cos(angle) * speed,
 			std::sin(angle) * speed);
@@ -345,9 +347,9 @@ void Scene::rebuildParticles() {
 		particle.position = QPointF(
 			unit(_random) * _size.width(),
 			unit(_random) * _size.height());
-		particle.speed = (10. + 28. * unit(_random)) * _config.scale;
+		particle.speed = (8. + 20. * unit(_random)) * _config.scale;
 		particle.phase = unit(_random) * 2. * kPi;
-		particle.size = (1.6 + 3.2 * unit(_random)) * _config.scale;
+		particle.size = (0.8 + 1.4 * unit(_random)) * _config.scale;
 		particle.color = i % 3;
 		_particles.push_back(particle);
 	}
@@ -379,6 +381,23 @@ void Scene::advance(double seconds) {
 			object.angles[k] += object.speeds[k] * dt;
 		}
 	}
+	const auto wrap = std::max(_textBounds.width(), _textBounds.height())
+		* 1.2;
+	for (auto &label : _labels) {
+		label.position += label.velocity * dt;
+		auto &x = label.position.rx();
+		auto &y = label.position.ry();
+		if (x < -wrap) {
+			x += width + 2 * wrap;
+		} else if (x > width + wrap) {
+			x -= width + 2 * wrap;
+		}
+		if (y < -wrap) {
+			y += height + 2 * wrap;
+		} else if (y > height + wrap) {
+			y -= height + 2 * wrap;
+		}
+	}
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
 	for (auto &particle : _particles) {
 		particle.position.ry() -= particle.speed * dt;
@@ -395,36 +414,56 @@ void Scene::advance(double seconds) {
 	}
 }
 
-QPointF Scene::textPosition() const {
-	const auto w = double(_size.width());
-	const auto h = double(_size.height());
-	const auto ax = std::max(0., (w - _textBounds.width()) / 2. - 30.) * 0.85;
-	const auto ay = std::max(0., (h - _textBounds.height()) / 2. - 30.) * 0.7;
-	return QPointF(
-		w / 2. + ax * std::sin(_time * 0.21),
-		h / 2. + ay * std::sin(_time * 0.29 + 1.3));
+void Scene::rebuildLabels() {
+	_labels.clear();
+	if (_size.isEmpty()) {
+		return;
+	}
+	const auto area = double(_size.width()) * _size.height();
+	const auto count = int(Clamp(area / 110000., 4., 10.));
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+	for (auto i = 0; i != count; ++i) {
+		auto label = Label();
+		label.position = QPointF(
+			unit(_random) * _size.width(),
+			unit(_random) * _size.height());
+		const auto angle = unit(_random) * 2. * kPi;
+		const auto speed = (14. + 22. * unit(_random)) * _config.scale;
+		label.velocity = QPointF(
+			std::cos(angle) * speed,
+			std::sin(angle) * speed * 0.6);
+		label.phase = unit(_random) * 2. * kPi;
+		label.scale = 0.8 + 0.45 * unit(_random);
+		_labels.push_back(label);
+	}
 }
 
-QRect Scene::textRect() const {
+QTransform Scene::labelTransform(const Label &label) const {
+	auto transform = QTransform();
+	transform.translate(label.position.x(), label.position.y());
+	transform.rotate(6. * std::sin(_time * 0.6 + label.phase));
+	const auto scale = label.scale
+		* (1. + 0.06 * std::sin(_time * 1.7 + label.phase));
+	transform.scale(scale, scale);
+	return transform;
+}
+
+QRect Scene::labelRect(const Label &label) const {
 	if (_textGlow.isNull()) {
 		return QRect();
 	}
-	auto transform = QTransform();
-	const auto position = textPosition();
-	transform.translate(position.x(), position.y());
-	transform.rotate(4. * std::sin(_time * 0.7));
-	const auto scale = 1. + 0.04 * std::sin(_time * 1.6);
-	transform.scale(scale, scale);
-	return transform.mapRect(
+	return labelTransform(label).mapRect(
 		QRectF(_textGlowOffset, QSizeF(_textGlow.size()))
 	).toAlignedRect().marginsAdded({ 2, 2, 2, 2 });
 }
 
 void Scene::collectRects(std::vector<QRect> &rects) const {
 	if (_config.text) {
-		const auto rect = textRect();
-		if (!rect.isEmpty()) {
-			rects.push_back(rect);
+		for (const auto &label : _labels) {
+			const auto rect = labelRect(label);
+			if (!rect.isEmpty()) {
+				rects.push_back(rect);
+			}
 		}
 	}
 	if (_config.objects) {
@@ -439,7 +478,7 @@ void Scene::collectRects(std::vector<QRect> &rects) const {
 	}
 	if (_config.particles) {
 		for (const auto &particle : _particles) {
-			const auto r = particle.size * 3. + 2.;
+			const auto r = particle.size * 2.4 + 2.;
 			rects.push_back(QRectF(
 				particle.position.x() - r,
 				particle.position.y() - r,
@@ -482,31 +521,34 @@ void Scene::paint(QPainter &p) const {
 		}
 	}
 	if (_config.text) {
-		p.setOpacity(_config.opacity);
-		paintText(p, palette);
+		for (const auto &label : _labels) {
+			p.setOpacity(_config.opacity);
+			paintLabel(p, label, palette);
+		}
 	}
 	p.restore();
 }
 
-void Scene::paintText(QPainter &p, const Palette &palette) const {
+void Scene::paintLabel(
+		QPainter &p,
+		const Label &label,
+		const Palette &palette) const {
 	if (_textPath.isEmpty()) {
 		return;
 	}
-	const auto position = textPosition();
 	const auto opacity = p.opacity();
 	p.save();
-	p.translate(position);
-	p.rotate(4. * std::sin(_time * 0.7));
-	const auto scale = 1. + 0.04 * std::sin(_time * 1.6);
-	p.scale(scale, scale);
+	p.setTransform(labelTransform(label), true);
 
-	const auto pulse = 0.55 + 0.45 * std::sin(_time * 2.1);
+	const auto pulse = 0.55 + 0.45 * std::sin(_time * 2.1 + label.phase);
 	p.setOpacity(opacity * (0.45 + 0.4 * pulse));
 	p.drawImage(_textGlowOffset, _textGlow);
 	p.setOpacity(opacity);
 
 	const auto width = std::max(1., _textBounds.width());
-	const auto shift = std::fmod(_time * width * 0.45, width * 2.);
+	const auto shift = std::fmod(
+		(_time + label.phase) * width * 0.45,
+		width * 2.);
 	auto gradient = QLinearGradient(
 		_textBounds.left() - shift,
 		0.,
@@ -520,7 +562,7 @@ void Scene::paintText(QPainter &p, const Palette &palette) const {
 	p.fillPath(_textPath, gradient);
 
 	const auto period = 3.2;
-	const auto phase = std::fmod(_time, period) / period;
+	const auto phase = std::fmod(_time + label.phase, period) / period;
 	const auto sweepX = _textBounds.left()
 		+ (phase * 1.8 - 0.4) * _textBounds.width();
 	auto shine = QLinearGradient(
@@ -534,7 +576,7 @@ void Scene::paintText(QPainter &p, const Palette &palette) const {
 	p.fillPath(_textPath, shine);
 
 	p.setBrush(Qt::NoBrush);
-	p.setPen(QPen(WithAlpha(palette.glow, 0.55), 1.2 * _config.scale));
+	p.setPen(QPen(WithAlpha(palette.glow, 0.55), 0.8 * _config.scale));
 	p.drawPath(_textPath);
 	p.restore();
 }
@@ -582,11 +624,11 @@ void Scene::paintObject(
 			const auto depth = Clamp(edge.depth, 0., 1.);
 			const auto base = Mix(palette.third, palette.first, depth);
 			const auto color = Mix(base, palette.second, hueShift * 0.5);
-			const auto width = (1.1 + 1.5 * depth) * _config.scale;
+			const auto width = (0.7 + 0.9 * depth) * _config.scale;
 			if (pass == 0) {
 				p.setPen(QPen(
 					WithAlpha(palette.glow, 0.10 + 0.18 * depth),
-					width * 3.2,
+					width * 2.6,
 					Qt::SolidLine,
 					Qt::RoundCap));
 			} else {
@@ -606,7 +648,7 @@ void Scene::paintObject(
 		if (vertex.depth < 0.45) {
 			continue;
 		}
-		const auto r = (1.2 + 2.2 * vertex.depth) * _config.scale;
+		const auto r = (0.7 + 1.3 * vertex.depth) * _config.scale;
 		p.setBrush(WithAlpha(palette.second, vertex.depth));
 		p.drawEllipse(vertex.point, r, r);
 	}
@@ -618,7 +660,7 @@ void Scene::paintParticles(QPainter &p, const Palette &palette) const {
 	for (const auto &particle : _particles) {
 		const auto twinkle = 0.35
 			+ 0.65 * (0.5 + 0.5 * std::sin(_time * 2.3 + particle.phase));
-		const auto r = particle.size * 3.;
+		const auto r = particle.size * 2.4;
 		auto gradient = QRadialGradient(particle.position, r);
 		const auto &color = colors[particle.color];
 		gradient.setColorAt(0., WithAlpha(QColor(255, 255, 255), twinkle));

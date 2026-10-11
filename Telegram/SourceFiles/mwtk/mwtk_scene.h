@@ -14,6 +14,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QImage>
 #include <QtGui/QPainterPath>
 #include <QtGui/QRegion>
+#include <QtGui/QTransform>
 
 #include <array>
 #include <random>
@@ -70,6 +71,12 @@ private:
 		double angles[3] = { 0., 0., 0. };
 		double speeds[3] = { 0., 0., 0. };
 	};
+	struct Label {
+		QPointF position;
+		QPointF velocity;
+		double phase = 0.;
+		double scale = 1.;
+	};
 	struct Particle {
 		QPointF position;
 		double speed = 0.;
@@ -81,10 +88,14 @@ private:
 	void rebuildText();
 	void rebuildObjects();
 	void rebuildParticles();
+	void rebuildLabels();
 	void collectRects(std::vector<QRect> &rects) const;
-	[[nodiscard]] QRect textRect() const;
-	[[nodiscard]] QPointF textPosition() const;
-	void paintText(QPainter &p, const Palette &palette) const;
+	[[nodiscard]] QTransform labelTransform(const Label &label) const;
+	[[nodiscard]] QRect labelRect(const Label &label) const;
+	void paintLabel(
+		QPainter &p,
+		const Label &label,
+		const Palette &palette) const;
 	void paintObject(
 		QPainter &p,
 		const Object &object,
@@ -103,6 +114,7 @@ private:
 	int _textGlowPalette = -1;
 
 	std::vector<Shape> _shapes;
+	std::vector<Label> _labels;
 	std::vector<Object> _objects;
 	std::vector<Particle> _particles;
 
