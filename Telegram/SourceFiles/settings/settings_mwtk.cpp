@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/compose_ai_button_factory.h"
 #include "ui/painter.h"
+#include "ui/style/style_core_scale.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/labels.h"
@@ -303,8 +304,8 @@ void MwtkSettings::setupContent() {
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
 		content,
-		rpl::single(Utf("MWTKgram основан на открытом коде Telegram Desktop. "
-			"ID в профиле можно скопировать нажатием.")));
+		rpl::producer<QString>(rpl::single(Utf("MWTKgram основан на открытом коде Telegram Desktop. "
+			"ID в профиле можно скопировать нажатием."))));
 
 	Ui::ResizeFitChild(this, content);
 }

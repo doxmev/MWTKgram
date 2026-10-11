@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/options.h"
 
+#include <algorithm>
+
 namespace Mwtk {
 namespace {
 

@@ -104,7 +104,7 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 		overlay->setGeometry(QRect(QPoint(), size));
 		overlay->raise();
 	}, overlay->lifetime());
-	base::install_event_filter(overlay, body, [=](not_null<QEvent*> e) {
+	base::install_event_filter(overlay, body.get(), [=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::ChildAdded) {
 			crl::on_main(overlay, [=] {
 				overlay->raise();

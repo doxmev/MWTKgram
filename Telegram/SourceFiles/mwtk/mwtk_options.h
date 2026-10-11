@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mwtk/mwtk_scene.h"
 
+#include <rpl/producer.h>
+
 namespace Mwtk {
 
 extern const char kOptionVisuals[];
