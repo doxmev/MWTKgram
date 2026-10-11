@@ -175,11 +175,21 @@ jobs:
 
           echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
 
-          if [ -z "$TG_API_ID" ] || [ -z "$TG_API_HASH" ]; then
-            echo "::error::Secrets TG_API_ID and TG_API_HASH are required."
+          API_ID="$(printf '%s' "$TG_API_ID" | tr -d '[:space:]')"
+          API_HASH="$(printf '%s' "$TG_API_HASH" | tr -d '[:space:]')"
+          API_ID="${API_ID#TG_API_ID=}"
+          API_HASH="${API_HASH#TG_API_HASH=}"
+          if ! [[ "$API_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Secret TG_API_ID must contain only digits (api_id from my.telegram.org)."
             exit 1
           fi
-          echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_ID=$TG_API_ID -D TDESKTOP_API_HASH=$TG_API_HASH" >> $GITHUB_ENV
+          if ! [[ "$API_HASH" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo "::error::Secret TG_API_HASH must be 32 hex characters (api_hash from my.telegram.org)."
+            exit 1
+          fi
+          echo "::add-mask::$API_ID"
+          echo "::add-mask::$API_HASH"
+          echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_ID=$API_ID -D TDESKTOP_API_HASH=$API_HASH" >> $GITHUB_ENV
 
       - name: Free up some disk space.
         shell: bash
@@ -227,9 +237,33 @@ jobs:
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON ^
-          %TDESKTOP_BUILD_DEFINE%
+          %TDESKTOP_BUILD_DEFINE% > %TBUILD%\configure.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
 
-          cmake --build ..\out --config Debug --parallel
+          cmake --build ..\out --config Debug --parallel > %TBUILD%\build.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
+
+      - name: Report build errors.
+        if: failure()
+        shell: bash
+        run: |
+          ROOT="$(cygpath -u "$TBUILD")"
+          : > errors.txt
+          for LOG in "$ROOT/configure.log" "$ROOT/build.log"; do
+            [ -f "$LOG" ] || continue
+            grep -aE "error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|error MSB[0-9]+|: error |Error:" "$LOG" | tr -d '\r' | sort -u | head -40 >> errors.txt || true
+          done
+          if [ ! -s errors.txt ]; then
+            for LOG in "$ROOT/configure.log" "$ROOT/build.log"; do
+              [ -f "$LOG" ] && tail -n 40 "$LOG" | tr -d '\r' >> errors.txt
+            done
+          fi
+          [ -s errors.txt ] || echo "No build logs were produced." > errors.txt
+          split -l 8 errors.txt chunk_
+          for CHUNK in chunk_*; do
+            MESSAGE="$(sed -e 's/%/%25/g' "$CHUNK" | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=Build log::$MESSAGE"
+          done
 
       - name: Move artifact.
         run: |
