@@ -114,8 +114,8 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v3-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-
 
       - name: Qt cache.
         id: cache-qt
@@ -130,6 +130,12 @@ jobs:
       - name: Libraries.
         run: |
           %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }}
+
+      - name: Rebuild pruned Rust bindings.
+        run: |
+          if exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 0
+          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }} tlottie wallet-engine tdesktop_rust || exit /b 1
+          if not exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 1
 
       - name: Read configuration matrix.
         shell: bash
@@ -193,7 +199,7 @@ jobs:
 
       - name: Free up some disk space.
         shell: bash
-        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' ')' -type f ')' -o -empty ')' -delete
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' -o -path '*/tdesktop_rust/out/*' ')' -type f ')' -o -empty ')' -delete
 
       - name: Save ThirdParty cache now.
         if: steps.cache-third-party.outputs.cache-hit != 'true'
@@ -212,7 +218,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v2-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v3-${{ env.CACHE_KEY }}
 
       - name: Save Qt cache now.
         if: steps.cache-qt.outputs.cache-hit != 'true'
