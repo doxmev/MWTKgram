@@ -133,7 +133,8 @@ jobs:
 
       - name: Libraries.
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }}
+          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }} > %TBUILD%\libraries.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
 
       - name: Rebuild pruned Rust bindings.
         run: |
@@ -293,6 +294,12 @@ jobs:
         run: |
           ROOT="$(cygpath -u "$TBUILD")"
           : > errors.txt
+          if [ -f "$ROOT/libraries.log" ] && [ ! -f "$ROOT/configure.log" ]; then
+            df -h 2>/dev/null | tr -d '\r' | grep -E "^[A-Z]:|/c|/d" | head -4 >> errors.txt || true
+            grep -aE "FAILED|BUILDING:|fatal error|error C[0-9]+|error LNK[0-9]+|error MSB[0-9]+|No space|not enough space" "$ROOT/libraries.log" | tr -d '\r' | tail -n 30 >> errors.txt || true
+            echo "----- tail -----" >> errors.txt
+            tail -n 60 "$ROOT/libraries.log" | tr -d '\r' >> errors.txt
+          fi
           for LOG in "$ROOT/configure.log" "$ROOT/build.log"; do
             [ -f "$LOG" ] || continue
             grep -aE "error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|error MSB[0-9]+|: error |Error:" "$LOG" | tr -d '\r' | sort -u | head -40 >> errors.txt || true
@@ -303,7 +310,8 @@ jobs:
             done
           fi
           [ -s errors.txt ] || echo "No build logs were produced." > errors.txt
-          split -l 8 errors.txt chunk_
+          head -n 110 errors.txt > errors_cut.txt
+          split -l 12 errors_cut.txt chunk_
           for CHUNK in chunk_*; do
             MESSAGE="$(sed -e 's/%/%25/g' "$CHUNK" | awk 'BEGIN{ORS="%0A"} {print}')"
             echo "::error title=Build log::$MESSAGE"
