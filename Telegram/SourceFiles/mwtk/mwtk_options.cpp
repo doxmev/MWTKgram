@@ -55,6 +55,69 @@ base::options::option<int> OptionIntensity({
 	.defaultValue = 1,
 });
 
+base::options::option<int> OptionRoom({
+	.id = kOptionRoom,
+	.name = "MWTKgram 3D room",
+	.description = "3D room behind chats.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionRoomYaw({
+	.id = kOptionRoomYaw,
+	.name = "MWTKgram room yaw",
+	.description = "Camera rotation in the 3D room.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionRoomPitch({
+	.id = kOptionRoomPitch,
+	.name = "MWTKgram room pitch",
+	.description = "Camera tilt in the 3D room.",
+	.defaultValue = 2,
+});
+
+base::options::option<int> OptionRoomFov({
+	.id = kOptionRoomFov,
+	.name = "MWTKgram room field of view",
+	.description = "Camera field of view in the 3D room.",
+	.defaultValue = 75,
+});
+
+base::options::toggle OptionRoomParallax({
+	.id = kOptionRoomParallax,
+	.name = "MWTKgram room parallax",
+	.description = "Camera follows the mouse.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionRoomMotion({
+	.id = kOptionRoomMotion,
+	.name = "MWTKgram room motion",
+	.description = "Camera sway and drifting fog.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionUiScene({
+	.id = kOptionUiScene,
+	.name = "MWTKgram interface in scene",
+	.description = "Interface framed inside the 3D scene.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionButtons3d({
+	.id = kOptionButtons3d,
+	.name = "MWTKgram 3D buttons",
+	.description = "Volumetric buttons.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionButtonsAnimated({
+	.id = kOptionButtonsAnimated,
+	.name = "MWTKgram animated buttons",
+	.description = "Animated glowing button highlight.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -63,6 +126,15 @@ const char kOptionObjects[] = "mwtk-objects";
 const char kOptionParticles[] = "mwtk-particles";
 const char kOptionPalette[] = "mwtk-palette";
 const char kOptionIntensity[] = "mwtk-intensity";
+const char kOptionRoom[] = "mwtk-room";
+const char kOptionRoomYaw[] = "mwtk-room-yaw";
+const char kOptionRoomPitch[] = "mwtk-room-pitch";
+const char kOptionRoomFov[] = "mwtk-room-fov";
+const char kOptionRoomParallax[] = "mwtk-room-parallax";
+const char kOptionRoomMotion[] = "mwtk-room-motion";
+const char kOptionUiScene[] = "mwtk-ui-scene";
+const char kOptionButtons3d[] = "mwtk-buttons-3d";
+const char kOptionButtonsAnimated[] = "mwtk-buttons-animated";
 
 QString IntensityName(int index) {
 	switch (index) {
@@ -107,6 +179,34 @@ rpl::producer<> ConfigChanges() {
 		OptionParticles.changes(),
 		OptionPalette.changes(),
 		OptionIntensity.changes());
+}
+
+rpl::producer<> RoomConfigChanges() {
+	return rpl::merge(
+		OptionRoom.changes(),
+		OptionRoomYaw.changes(),
+		OptionRoomPitch.changes(),
+		OptionRoomFov.changes(),
+		OptionRoomParallax.changes(),
+		OptionRoomMotion.changes(),
+		OptionPalette.changes());
+}
+
+rpl::producer<> InterfaceConfigChanges() {
+	return rpl::merge(
+		OptionUiScene.changes(),
+		OptionButtons3d.changes(),
+		OptionButtonsAnimated.changes(),
+		OptionRoom.changes(),
+		OptionPalette.changes());
+}
+
+bool OptionValue(const char id[]) {
+	return base::options::value<bool>(id);
+}
+
+int OptionInt(const char id[]) {
+	return base::options::value<int>(id);
 }
 
 } // namespace Mwtk

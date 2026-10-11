@@ -16,6 +16,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_overlay.h"
+#include "mwtk/mwtk_room.h"
+#include "base/timer.h"
 #include "settings/settings_common.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/controls/compose_ai_button_factory.h"
@@ -34,6 +36,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QLinearGradient>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
 
 namespace Settings {
 namespace {
@@ -186,8 +189,12 @@ void AddPalettePicker(not_null<Ui::VerticalLayout*> container) {
 	label->setAttribute(Qt::WA_TransparentForMouseEvents);
 }
 
-void AddIntensityPicker(not_null<Ui::VerticalLayout*> container) {
-	auto &option = base::options::lookup<int>(::Mwtk::kOptionIntensity);
+void AddSegmented(
+		not_null<Ui::VerticalLayout*> container,
+		const char id[],
+		std::vector<QString> labels) {
+	auto &option = base::options::lookup<int>(id);
+	const auto count = int(labels.size());
 	const auto height = st::settingsButton.height;
 	const auto picker = container->add(
 		object_ptr<Ui::RpWidget>(container),
@@ -196,7 +203,7 @@ void AddIntensityPicker(not_null<Ui::VerticalLayout*> container) {
 	picker->setCursor(style::cur_pointer);
 
 	const auto segment = [=](int index) {
-		const auto width = picker->width() / ::Mwtk::kIntensityCount;
+		const auto width = picker->width() / std::max(count, 1);
 		return QRect(index * width, 0, width, height);
 	};
 	picker->paintRequest(
@@ -212,7 +219,7 @@ void AddIntensityPicker(not_null<Ui::VerticalLayout*> container) {
 			base::options::value<int>(::Mwtk::kOptionPalette),
 			0.);
 		p.setFont(st::semiboldFont);
-		for (auto i = 0; i != ::Mwtk::kIntensityCount; ++i) {
+		for (auto i = 0; i != count; ++i) {
 			const auto rect = segment(i);
 			if (i == selected) {
 				auto gradient = QLinearGradient(rect.topLeft(), rect.topRight());
@@ -230,7 +237,7 @@ void AddIntensityPicker(not_null<Ui::VerticalLayout*> container) {
 			} else {
 				p.setPen(st::windowFg);
 			}
-			p.drawText(rect, Qt::AlignCenter, ::Mwtk::IntensityName(i));
+			p.drawText(rect, Qt::AlignCenter, labels[i]);
 		}
 	}, picker->lifetime());
 	rpl::merge(
@@ -244,13 +251,164 @@ void AddIntensityPicker(not_null<Ui::VerticalLayout*> container) {
 		return e->type() == QEvent::MouseButtonPress;
 	}) | rpl::on_next([=, &option](not_null<QEvent*> e) {
 		const auto position = static_cast<QMouseEvent*>(e.get())->pos();
-		for (auto i = 0; i != ::Mwtk::kIntensityCount; ++i) {
+		for (auto i = 0; i != count; ++i) {
 			if (segment(i).contains(position)) {
 				option.set(i);
 				break;
 			}
 		}
 	}, picker->lifetime());
+}
+
+void AddSlider(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		const char id[],
+		int min,
+		int max,
+		const QString &suffix) {
+	auto &option = base::options::lookup<int>(id);
+	const auto height = int(st::settingsButton.height * 1.5);
+	const auto slider = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::boxRowPadding);
+	slider->resize(slider->width(), height);
+	slider->setCursor(style::cur_pointer);
+	const auto dragging = slider->lifetime().make_state<bool>(false);
+
+	const auto track = [=] {
+		const auto knob = height / 5.;
+		return QRectF(knob, height * 0.68, slider->width() - 2 * knob, 4.);
+	};
+	const auto apply = [=, &option](QPoint position) {
+		const auto line = track();
+		const auto ratio = std::clamp(
+			(position.x() - line.left()) / std::max(line.width(), 1.),
+			0.,
+			1.);
+		option.set(min + int(std::round(ratio * (max - min))));
+	};
+	slider->paintRequest(
+	) | rpl::on_next([=, &option] {
+		auto p = QPainter(slider);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto palette = ::Mwtk::PaletteAt(
+			base::options::value<int>(::Mwtk::kOptionPalette),
+			0.);
+		const auto value = std::clamp(option.value(), min, max);
+		const auto ratio = (value - min) / double(std::max(max - min, 1));
+		p.setFont(st::normalFont);
+		p.setPen(st::windowFg);
+		p.drawText(
+			QRect(0, 0, slider->width(), int(height * 0.5)),
+			Qt::AlignLeft | Qt::AlignVCenter,
+			title);
+		p.setPen(st::windowSubTextFg);
+		p.drawText(
+			QRect(0, 0, slider->width(), int(height * 0.5)),
+			Qt::AlignRight | Qt::AlignVCenter,
+			QString::number(value) + suffix);
+		const auto line = track();
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(line, 2., 2.);
+		auto filled = line;
+		filled.setWidth(line.width() * ratio);
+		auto gradient = QLinearGradient(line.topLeft(), line.topRight());
+		gradient.setColorAt(0., palette.first);
+		gradient.setColorAt(1., palette.third);
+		p.setBrush(gradient);
+		p.drawRoundedRect(filled, 2., 2.);
+		const auto knob = QPointF(filled.right(), line.center().y());
+		const auto r = height / 7.;
+		p.setBrush(QColor(0, 0, 0, 60));
+		p.drawEllipse(knob + QPointF(0, 1.5), r, r);
+		p.setBrush(palette.second);
+		p.drawEllipse(knob, r, r);
+		p.setBrush(QColor(255, 255, 255, 160));
+		p.drawEllipse(knob - QPointF(r * 0.3, r * 0.3), r * 0.35, r * 0.35);
+	}, slider->lifetime());
+	rpl::merge(
+		option.changes(),
+		base::options::lookup<int>(::Mwtk::kOptionPalette).changes()
+	) | rpl::on_next([=] {
+		slider->update();
+	}, slider->lifetime());
+	slider->events(
+	) | rpl::on_next([=](not_null<QEvent*> e) {
+		const auto type = e->type();
+		if (type == QEvent::MouseButtonPress) {
+			*dragging = true;
+			apply(static_cast<QMouseEvent*>(e.get())->pos());
+		} else if (type == QEvent::MouseMove && *dragging) {
+			apply(static_cast<QMouseEvent*>(e.get())->pos());
+		} else if (type == QEvent::MouseButtonRelease) {
+			*dragging = false;
+		}
+	}, slider->lifetime());
+}
+
+void AddRoomPreview(not_null<Ui::VerticalLayout*> container) {
+	const auto height = st::settingsButton.height * 4;
+	const auto wrap = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::boxRowPadding);
+	wrap->resize(wrap->width(), height);
+	struct State {
+		::Mwtk::RoomFrame frame;
+		base::Timer timer;
+	};
+	const auto state = wrap->lifetime().make_state<State>();
+	const auto render = [=] {
+		auto params = ::Mwtk::RoomParams();
+		params.type = ::Mwtk::CurrentRoom();
+		params.yaw = base::options::value<int>(::Mwtk::kOptionRoomYaw);
+		params.pitch = base::options::value<int>(::Mwtk::kOptionRoomPitch);
+		params.fov = base::options::value<int>(::Mwtk::kOptionRoomFov);
+		params.ratio = style::DevicePixelRatio();
+		params.accent = ::Mwtk::PaletteAt(
+			base::options::value<int>(::Mwtk::kOptionPalette),
+			0.).first;
+		state->frame = ::Mwtk::RenderRoom(params, wrap->size());
+		wrap->update();
+	};
+	state->timer.setCallback(render);
+	rpl::merge(
+		::Mwtk::RoomConfigChanges(),
+		wrap->sizeValue() | rpl::to_empty
+	) | rpl::on_next([=] {
+		state->timer.callOnce(60);
+	}, wrap->lifetime());
+	::Mwtk::RoomRepaintRequests(
+	) | rpl::on_next([=] {
+		wrap->update();
+	}, wrap->lifetime());
+	wrap->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(wrap);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto radius = st::settingsButton.height / 3.;
+		auto clip = QPainterPath();
+		clip.addRoundedRect(QRectF(wrap->rect()), radius, radius);
+		p.setClipPath(clip);
+		if (state->frame.layers.empty()) {
+			p.fillRect(wrap->rect(), st::windowBgOver);
+			p.setPen(st::windowSubTextFg);
+			p.setFont(st::normalFont);
+			p.drawText(
+				wrap->rect(),
+				Qt::AlignCenter,
+				Utf("3D-комната выключена"));
+			return;
+		}
+		::Mwtk::PaintRoomFrame(
+			p,
+			state->frame,
+			wrap->size(),
+			::Mwtk::RoomCameraShift(),
+			::Mwtk::RoomTime(),
+			base::options::value<bool>(::Mwtk::kOptionRoomMotion));
+	}, wrap->lifetime());
 }
 
 } // namespace
@@ -287,7 +445,40 @@ void MwtkSettings::setupContent() {
 	AddPalettePicker(content);
 	Ui::AddSkip(content);
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Яркость")));
-	AddIntensityPicker(content);
+	AddSegmented(content, ::Mwtk::kOptionIntensity, {
+		::Mwtk::IntensityName(0),
+		::Mwtk::IntensityName(1),
+		::Mwtk::IntensityName(2),
+	});
+	Ui::AddSkip(content);
+	Ui::AddDivider(content);
+	Ui::AddSkip(content);
+
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-комнаты")));
+	AddRoomPreview(content);
+	Ui::AddSkip(content);
+	AddSegmented(content, ::Mwtk::kOptionRoom, {
+		::Mwtk::RoomName(::Mwtk::RoomType::None),
+		::Mwtk::RoomName(::Mwtk::RoomType::Forest),
+		Utf("Неон"),
+	});
+	Ui::AddSkip(content);
+	AddSlider(content, Utf("Поворот камеры"), ::Mwtk::kOptionRoomYaw, 0, 359, Utf("°"));
+	AddSlider(content, Utf("Наклон камеры"), ::Mwtk::kOptionRoomPitch, -15, 25, Utf("°"));
+	AddSlider(content, Utf("Угол обзора"), ::Mwtk::kOptionRoomFov, 45, 110, Utf("°"));
+	AddOptionToggle(window, content, Utf("Камера следует за мышью"), ::Mwtk::kOptionRoomParallax);
+	AddOptionToggle(window, content, Utf("Покачивание камеры и туман"), ::Mwtk::kOptionRoomMotion);
+	Ui::AddSkip(content);
+	Ui::AddDividerText(
+		content,
+		rpl::producer<QString>(rpl::single(Utf("3D-комната рисуется за сообщениями в чате. "
+			"На слабом компьютере выключи покачивание или саму комнату."))));
+	Ui::AddSkip(content);
+
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-интерфейс")));
+	AddOptionToggle(window, content, Utf("Интерфейс внутри 3D-сцены"), ::Mwtk::kOptionUiScene);
+	AddOptionToggle(window, content, Utf("Объёмные кнопки"), ::Mwtk::kOptionButtons3d);
+	AddOptionToggle(window, content, Utf("Анимация кнопок"), ::Mwtk::kOptionButtonsAnimated);
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);

@@ -10,6 +10,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_scene.h"
 #include "ui/rp_widget.h"
 
+#include <QtCore/QPointer>
+
 namespace Mwtk {
 
 class VisualsWidget final : public Ui::RpWidget {
@@ -23,15 +25,47 @@ protected:
 	void paintEvent(QPaintEvent *e) override;
 
 private:
+	struct Ripple {
+		QPointF center;
+		double progress = 0.;
+	};
+	struct ButtonState {
+		QPointer<QWidget> target;
+		QRectF rect;
+		double alpha = 0.;
+		double press = 0.;
+		QPointF light;
+		bool pressed = false;
+		std::vector<Ripple> ripples;
+		QRect lastDirty;
+	};
+
 	void tick();
 	void refreshFromOptions();
 	[[nodiscard]] bool canAnimate() const;
+	[[nodiscard]] QRegion tickButtons(double dt);
+	[[nodiscard]] QRegion tickFrame(double dt);
+	[[nodiscard]] QWidget *findHoveredButton() const;
+	void paintButtons(QPainter &p) const;
+	void paintFrame(QPainter &p) const;
+	void refreshFrameCache();
 
 	Scene _scene;
 	base::Timer _timer;
 	crl::time _lastTick = 0;
 	bool _running = false;
 	bool _followOptions = false;
+	bool _sceneEnabled = false;
+	bool _buttons3d = false;
+	bool _buttonsAnimated = false;
+	bool _frameEnabled = false;
+	ButtonState _button;
+
+	QImage _branch;
+	QSize _branchFor;
+	QPointF _frameShift;
+	double _frameTime = 0.;
+	std::vector<QRect> _frameRects;
 
 };
 

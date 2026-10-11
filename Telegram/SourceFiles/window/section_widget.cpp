@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/section_widget.h"
 
+#include "mwtk/mwtk_room.h"
+
 #include "mainwidget.h"
 #include "mainwindow.h"
 #include "ui/ui_utility.h"
@@ -243,6 +245,11 @@ AbstractSectionWidget::AbstractSectionWidget(
 	}) | rpl::flatten_latest() | rpl::on_next([=] {
 		update();
 	}, lifetime());
+
+	Mwtk::RoomRepaintRequests(
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
 }
 
 Main::Session &AbstractSectionWidget::session() const {
@@ -392,6 +399,9 @@ void SectionWidget::PaintBackground(
 		QSize fill,
 		QRect clip,
 		bool paused) {
+	if (Mwtk::PaintRoom(p, fill)) {
+		return;
+	}
 	const auto &background = theme->background();
 	if (background.colorForFill) {
 		p.fillRect(clip, *background.colorForFill);

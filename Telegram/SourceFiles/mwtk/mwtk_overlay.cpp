@@ -8,18 +8,47 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/event_filter.h"
 #include "mwtk/mwtk_options.h"
+#include "mwtk/mwtk_room.h"
+#include "ui/abstract_button.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
 
+#include <QtGui/QCursor>
+#include <QtGui/QGuiApplication>
+#include <QtGui/QLinearGradient>
 #include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
+#include <QtGui/QRadialGradient>
+#include <QtWidgets/QApplication>
+
+#include <algorithm>
+#include <cmath>
 
 namespace Mwtk {
 namespace {
 
 constexpr auto kFrameDelay = crl::time(16);
+constexpr auto kButtonGlow = 12;
 
 [[nodiscard]] double CurrentScale() {
 	return style::Scale() / 100.;
+}
+
+[[nodiscard]] double Ease(double dt, double speed) {
+	return 1. - std::exp(-dt * speed);
+}
+
+[[nodiscard]] QColor WithAlpha(QColor color, double alpha) {
+	color.setAlphaF(float(std::clamp(alpha, 0., 1.)));
+	return color;
+}
+
+[[nodiscard]] QRectF Lerp(const QRectF &a, const QRectF &b, double k) {
+	return QRectF(
+		a.x() + (b.x() - a.x()) * k,
+		a.y() + (b.y() - a.y()) * k,
+		a.width() + (b.width() - a.width()) * k,
+		a.height() + (b.height() - a.height()) * k);
 }
 
 } // namespace
@@ -34,15 +63,20 @@ VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
 	sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		_scene.resize(size);
+		refreshFrameCache();
 		update();
 	}, lifetime());
 
 	if (_followOptions) {
-		ConfigChanges(
+		rpl::merge(
+			ConfigChanges(),
+			InterfaceConfigChanges()
 		) | rpl::on_next([=] {
 			refreshFromOptions();
 		}, lifetime());
 		refreshFromOptions();
+	} else {
+		_sceneEnabled = true;
 	}
 }
 
@@ -67,7 +101,13 @@ void VisualsWidget::setRunning(bool running) {
 
 void VisualsWidget::refreshFromOptions() {
 	setConfig(CurrentConfig(CurrentScale()));
-	setRunning(VisualsEnabled());
+	_sceneEnabled = VisualsEnabled();
+	_buttons3d = OptionValue(kOptionButtons3d);
+	_buttonsAnimated = OptionValue(kOptionButtonsAnimated);
+	_frameEnabled = OptionValue(kOptionUiScene);
+	refreshFrameCache();
+	setRunning(_sceneEnabled || _buttons3d || _buttonsAnimated || _frameEnabled);
+	update();
 }
 
 bool VisualsWidget::canAnimate() const {
@@ -80,21 +120,336 @@ bool VisualsWidget::canAnimate() const {
 
 void VisualsWidget::tick() {
 	const auto now = crl::now();
-	const auto elapsed = now - _lastTick;
+	const auto dt = std::min((now - _lastTick) / 1000., 0.1);
 	_lastTick = now;
 	if (!canAnimate()) {
 		return;
 	}
-	_scene.advance(elapsed / 1000.);
-	const auto dirty = _scene.takeDirtyRegion();
+	_frameTime += dt;
+	auto dirty = QRegion();
+	if (_sceneEnabled) {
+		_scene.advance(dt);
+		dirty += _scene.takeDirtyRegion();
+	}
+	if (_followOptions) {
+		dirty += tickButtons(dt);
+		dirty += tickFrame(dt);
+	}
 	if (!dirty.isEmpty()) {
 		update(dirty);
 	}
 }
 
+QWidget *VisualsWidget::findHoveredButton() const {
+	const auto top = window();
+	if (!top || QApplication::activeWindow() != top) {
+		return nullptr;
+	}
+	const auto parent = parentWidget();
+	auto widget = QApplication::widgetAt(QCursor::pos());
+	while (widget && widget != top) {
+		if (dynamic_cast<Ui::AbstractButton*>(widget)) {
+			break;
+		}
+		widget = widget->parentWidget();
+	}
+	if (!widget
+		|| widget == top
+		|| !parent
+		|| !parent->isAncestorOf(widget)
+		|| !widget->isVisible()) {
+		return nullptr;
+	}
+	const auto area = double(widget->width()) * widget->height();
+	const auto full = double(std::max(1, width())) * std::max(1, height());
+	if (widget->height() > 180 * CurrentScale() || area > full * 0.3) {
+		return nullptr;
+	}
+	return widget;
+}
+
+QRegion VisualsWidget::tickButtons(double dt) {
+	auto &state = _button;
+	if (!_buttons3d && !_buttonsAnimated) {
+		if (!state.lastDirty.isEmpty()) {
+			const auto result = QRegion(state.lastDirty);
+			state = ButtonState();
+			return result;
+		}
+		return QRegion();
+	}
+	const auto hovered = findHoveredButton();
+	if (hovered) {
+		const auto goal = QRectF(
+			QRect(hovered->mapTo(parentWidget(), QPoint()), hovered->size())
+		).intersected(QRectF(rect()));
+		if (state.target != hovered) {
+			if (state.alpha < 0.05 || state.rect.isEmpty()) {
+				state.rect = goal;
+			}
+			state.target = hovered;
+		}
+		state.rect = Lerp(state.rect, goal, Ease(dt, 16.));
+		state.alpha += (1. - state.alpha) * Ease(dt, 10.);
+		const auto local = mapFromGlobal(QCursor::pos());
+		state.light = QPointF(
+			std::clamp((local.x() - state.rect.x()) / std::max(1., state.rect.width()), 0., 1.),
+			std::clamp((local.y() - state.rect.y()) / std::max(1., state.rect.height()), 0., 1.));
+		const auto pressed = (QGuiApplication::mouseButtons() & Qt::LeftButton) != 0;
+		if (pressed && !state.pressed && _buttonsAnimated) {
+			state.ripples.push_back({ QPointF(local), 0. });
+		}
+		state.pressed = pressed;
+	} else {
+		state.alpha += (0. - state.alpha) * Ease(dt, 8.);
+		state.pressed = false;
+		if (state.alpha < 0.01) {
+			state.target = nullptr;
+		}
+	}
+	state.press += ((state.pressed ? 1. : 0.) - state.press) * Ease(dt, 22.);
+	for (auto &ripple : state.ripples) {
+		ripple.progress += dt / 0.65;
+	}
+	state.ripples.erase(
+		std::remove_if(state.ripples.begin(), state.ripples.end(), [](const Ripple &r) {
+			return r.progress >= 1.;
+		}),
+		state.ripples.end());
+
+	const auto margin = int(kButtonGlow * CurrentScale()) + 4;
+	auto now = (state.alpha > 0.003)
+		? state.rect.toAlignedRect().marginsAdded({ margin, margin, margin, margin })
+		: QRect();
+	for (const auto &ripple : state.ripples) {
+		const auto r = int(std::ceil(std::max(state.rect.width(), state.rect.height()) * 1.2));
+		now = now.united(QRect(
+			int(ripple.center.x()) - r,
+			int(ripple.center.y()) - r,
+			2 * r,
+			2 * r));
+	}
+	auto result = QRegion(state.lastDirty);
+	if (!now.isEmpty()) {
+		result += now;
+	}
+	state.lastDirty = now;
+	return result;
+}
+
+void VisualsWidget::refreshFrameCache() {
+	if (!_frameEnabled || size().isEmpty()) {
+		_branch = QImage();
+		_branchFor = QSize();
+		return;
+	}
+	const auto wanted = QSize(
+		std::max(80, int(width() * 0.3)),
+		std::max(60, int(height() * 0.3)));
+	if (_branchFor != wanted) {
+		_branchFor = wanted;
+		_branch = RenderBranch(wanted, style::DevicePixelRatio());
+	}
+}
+
+QRegion VisualsWidget::tickFrame(double) {
+	if (!_frameEnabled) {
+		if (!_frameRects.empty()) {
+			auto result = QRegion();
+			for (const auto &rect : _frameRects) {
+				result += rect;
+			}
+			_frameRects.clear();
+			return result;
+		}
+		return QRegion();
+	}
+	const auto was = _frameShift;
+	_frameShift = RoomCameraShift();
+	const auto moved = std::abs(was.x() - _frameShift.x())
+		+ std::abs(was.y() - _frameShift.y());
+	const auto room = CurrentRoom();
+	const auto animated = (room == RoomType::Neon)
+		|| OptionValue(kOptionRoomMotion);
+	if (moved < 0.0003 && !animated && !_frameRects.empty()) {
+		return QRegion();
+	}
+	auto rects = std::vector<QRect>();
+	const auto w = width();
+	const auto h = height();
+	const auto pad = int(std::max(w, h) * 0.06);
+	if (room == RoomType::Forest && !_branch.isNull()) {
+		const auto bw = _branchFor.width() + pad * 2;
+		const auto bh = _branchFor.height() + pad * 2;
+		rects.push_back(QRect(-pad, -pad, bw, bh));
+		rects.push_back(QRect(w - bw + pad, -pad, bw, bh));
+		rects.push_back(QRect(0, h - int(h * 0.16), w, int(h * 0.16)));
+	} else {
+		const auto edge = int(std::max(18., 26. * CurrentScale()));
+		rects.push_back(QRect(0, 0, w, edge));
+		rects.push_back(QRect(0, h - edge, w, edge));
+		rects.push_back(QRect(0, 0, edge, h));
+		rects.push_back(QRect(w - edge, 0, edge, h));
+	}
+	auto result = QRegion();
+	for (const auto &rect : _frameRects) {
+		result += rect;
+	}
+	for (const auto &rect : rects) {
+		result += rect;
+	}
+	_frameRects = std::move(rects);
+	return result;
+}
+
+void VisualsWidget::paintFrame(QPainter &p) const {
+	if (!_frameEnabled) {
+		return;
+	}
+	const auto w = double(width());
+	const auto h = double(height());
+	const auto room = CurrentRoom();
+	const auto palette = PaletteAt(OptionInt(kOptionPalette), _frameTime);
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setRenderHint(QPainter::SmoothPixmapTransform);
+	if (room == RoomType::Forest && !_branch.isNull()) {
+		const auto shift = QPointF(
+			-_frameShift.x() * w * 0.12,
+			_frameShift.y() * h * 0.12);
+		const auto sway = std::sin(_frameTime * 0.6) * 2.;
+		const auto size = QSizeF(_branchFor);
+		p.setOpacity(0.95);
+		p.save();
+		p.translate(shift.x(), shift.y());
+		p.rotate(sway * 0.4);
+		p.drawImage(QRectF(QPointF(), size), _branch);
+		p.restore();
+		p.save();
+		p.translate(w + shift.x(), shift.y());
+		p.rotate(-sway * 0.4);
+		p.scale(-1., 1.);
+		p.drawImage(QRectF(QPointF(), size), _branch);
+		p.restore();
+		p.setOpacity(1.);
+		auto mist = QLinearGradient(0, h * 0.84, 0, h);
+		const auto fog = QColor(40, 54, 60);
+		mist.setColorAt(0., WithAlpha(fog, 0.));
+		mist.setColorAt(1., WithAlpha(fog, 0.35 + 0.06 * std::sin(_frameTime * 0.5)));
+		p.fillRect(QRectF(0, h * 0.84, w, h * 0.16), mist);
+	} else {
+		const auto edge = std::max(18., 26. * CurrentScale());
+		const auto pulse = 0.65 + 0.35 * std::sin(_frameTime * 1.4);
+		const auto glow = (room == RoomType::Neon)
+			? QColor(255, 47, 208)
+			: palette.first;
+		const auto cool = (room == RoomType::Neon)
+			? QColor(34, 224, 255)
+			: palette.third;
+		const auto drawEdge = [&](QRectF rect, QPointF from, QPointF till) {
+			auto gradient = QLinearGradient(from, till);
+			gradient.setColorAt(0., WithAlpha(glow, 0.28 * pulse));
+			gradient.setColorAt(1., WithAlpha(glow, 0.));
+			p.fillRect(rect, gradient);
+		};
+		drawEdge(QRectF(0, 0, w, edge), { 0, 0 }, { 0, edge });
+		drawEdge(QRectF(0, h - edge, w, edge), { 0, h }, { 0, h - edge });
+		drawEdge(QRectF(0, 0, edge, h), { 0, 0 }, { edge, 0 });
+		drawEdge(QRectF(w - edge, 0, edge, h), { w, 0 }, { w - edge, 0 });
+		auto line = QLinearGradient(0, 0, w, h);
+		const auto phase = std::fmod(_frameTime * 0.1, 1.);
+		line.setColorAt(0., WithAlpha(glow, 0.9));
+		line.setColorAt(std::clamp(phase, 0.01, 0.99), WithAlpha(cool, 0.9));
+		line.setColorAt(1., WithAlpha(glow, 0.9));
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(QBrush(line), 1.6 * CurrentScale()));
+		const auto inset = 2. * CurrentScale();
+		p.drawRoundedRect(QRectF(inset, inset, w - 2 * inset, h - 2 * inset), 8., 8.);
+	}
+	p.restore();
+}
+
+void VisualsWidget::paintButtons(QPainter &p) const {
+	const auto &state = _button;
+	if ((!_buttons3d && !_buttonsAnimated)
+		|| (state.alpha <= 0.003 && state.ripples.empty())) {
+		return;
+	}
+	const auto palette = PaletteAt(OptionInt(kOptionPalette), _frameTime);
+	const auto rect = state.rect;
+	const auto radius = std::min(10. * CurrentScale(), rect.height() / 3.);
+	auto shape = QPainterPath();
+	shape.addRoundedRect(rect, radius, radius);
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	if (_buttons3d && state.alpha > 0.003) {
+		const auto a = state.alpha;
+		const auto press = state.press;
+		const auto lift = (1. - press) * 3. * CurrentScale();
+		auto shadow = QLinearGradient(rect.bottomLeft(), rect.bottomLeft() + QPointF(0, lift + 6.));
+		shadow.setColorAt(0., QColor(0, 0, 0, int(70 * a)));
+		shadow.setColorAt(1., QColor(0, 0, 0, 0));
+		p.fillRect(QRectF(rect.left() + radius, rect.bottom(), rect.width() - 2 * radius, lift + 6.), shadow);
+
+		p.save();
+		p.setClipPath(shape);
+		auto bevel = QLinearGradient(rect.topLeft(), rect.bottomLeft());
+		const auto top = (1. - press) * 0.22 * a;
+		const auto bottom = (0.18 + press * 0.1) * a;
+		bevel.setColorAt(0., QColor(255, 255, 255, int(255 * top)));
+		bevel.setColorAt(0.45, QColor(255, 255, 255, 0));
+		bevel.setColorAt(0.55, QColor(0, 0, 0, 0));
+		bevel.setColorAt(1., QColor(0, 0, 0, int(255 * bottom)));
+		p.fillRect(rect, bevel);
+		if (press > 0.01) {
+			p.fillRect(rect, QColor(0, 0, 0, int(40 * press * a)));
+		}
+		const auto light = QPointF(
+			rect.x() + rect.width() * state.light.x(),
+			rect.y() + rect.height() * state.light.y());
+		auto spot = QRadialGradient(light, std::max(rect.width(), rect.height()) * 0.6);
+		spot.setColorAt(0., QColor(255, 255, 255, int(46 * a * (1. - press))));
+		spot.setColorAt(1., QColor(255, 255, 255, 0));
+		p.fillRect(rect, spot);
+		p.restore();
+	}
+	if (_buttonsAnimated && state.alpha > 0.003) {
+		auto gradient = QLinearGradient(rect.topLeft(), rect.topRight());
+		const auto phase = std::fmod(_frameTime * 0.35, 1.);
+		gradient.setColorAt(0., palette.first);
+		gradient.setColorAt(std::clamp(phase, 0.01, 0.99), palette.second);
+		gradient.setColorAt(1., palette.third);
+		p.setBrush(Qt::NoBrush);
+		for (auto i = 0; i != 4; ++i) {
+			const auto widthPx = (kButtonGlow - i * 3.) * CurrentScale() * 0.6;
+			p.setOpacity(state.alpha * (0.05 + i * 0.06));
+			p.setPen(QPen(QBrush(gradient), std::max(1., widthPx)));
+			p.drawPath(shape);
+		}
+		p.setOpacity(state.alpha);
+		p.setPen(QPen(QBrush(gradient), 1.4 * CurrentScale()));
+		p.drawPath(shape);
+		p.setOpacity(1.);
+	}
+	for (const auto &ripple : state.ripples) {
+		const auto r = std::max(rect.width(), rect.height()) * 1.1 * ripple.progress;
+		const auto fade = 1. - ripple.progress;
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(WithAlpha(palette.second, 0.7 * fade), 2. * CurrentScale() * (0.5 + fade)));
+		p.drawEllipse(ripple.center, r, r);
+	}
+	p.restore();
+}
+
 void VisualsWidget::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
-	_scene.paint(p);
+	if (_sceneEnabled) {
+		_scene.paint(p);
+	}
+	if (_followOptions) {
+		paintFrame(p);
+		paintButtons(p);
+	}
 }
 
 void SetupOverlay(not_null<Ui::RpWidget*> body) {

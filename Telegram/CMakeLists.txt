@@ -2354,6 +2354,10 @@ PRIVATE
     mwtk/mwtk_options.h
     mwtk/mwtk_overlay.cpp
     mwtk/mwtk_overlay.h
+    mwtk/mwtk_room.cpp
+    mwtk/mwtk_room.h
+    mwtk/mwtk_room_render.cpp
+    mwtk/mwtk_room_render.h
     mwtk/mwtk_scene.cpp
     mwtk/mwtk_scene.h
     settings.cpp
