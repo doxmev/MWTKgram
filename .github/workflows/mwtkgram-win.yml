@@ -13,6 +13,9 @@ concurrency:
   group: mwtkgram-win-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
 
   windows:
@@ -38,8 +41,9 @@ jobs:
     steps:
       - name: Prepare directories.
         run: |
-          mkdir %userprofile%\TBuild\Libraries
-          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          if exist D:\ (set "TBUILD_REAL=D:\TBuild") else (set "TBUILD_REAL=%userprofile%\TBuild")
+          mkdir %TBUILD_REAL%\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %TBUILD_REAL%
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
           echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
 
@@ -114,8 +118,8 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v3-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-v1-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-
 
       - name: Qt cache.
         id: cache-qt
@@ -124,17 +128,17 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
-          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-
 
       - name: Libraries.
         run: |
-          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }}
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }}
 
       - name: Rebuild pruned Rust bindings.
         run: |
           if exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 0
-          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent ${{ matrix.qt }} tlottie wallet-engine tdesktop_rust || exit /b 1
+          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }} tlottie wallet-engine tdesktop_rust || exit /b 1
           if not exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 1
 
       - name: Read configuration matrix.
@@ -218,7 +222,7 @@ jobs:
             !${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\*
             !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-v3-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-v1-${{ env.CACHE_KEY }}
 
       - name: Save Qt cache now.
         if: steps.cache-qt.outputs.cache-hit != 'true'
@@ -227,7 +231,7 @@ jobs:
           path: |
             ${{ env.LibrariesPath }}\[qQ]t[_-]*
             ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
-          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-${{ env.CACHE_KEY }}
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-${{ env.CACHE_KEY }}
 
       - name: Free disk space for the build.
         shell: pwsh
@@ -273,14 +277,14 @@ jobs:
           %TDESKTOP_BUILD_ARCH% ^
           ${{ matrix.qt }} ^
           %TDESKTOP_BUILD_API% ^
-          -D CMAKE_CONFIGURATION_TYPES=Debug ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
           -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
           -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
           -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON ^
           %TDESKTOP_BUILD_DEFINE% > %TBUILD%\configure.log 2>&1
           if %errorlevel% neq 0 exit /b 1
 
-          cmake --build ..\out --config Debug --parallel > %TBUILD%\build.log 2>&1
+          cmake --build ..\out --config Release --parallel > %TBUILD%\build.log 2>&1
           if %errorlevel% neq 0 exit /b 1
 
       - name: Report build errors.
@@ -307,7 +311,7 @@ jobs:
 
       - name: Move artifact.
         run: |
-          set OUT=%TBUILD%\%REPO_NAME%\out\Debug
+          set OUT=%TBUILD%\%REPO_NAME%\out\Release
           mkdir artifact
           move %OUT%\Telegram.exe artifact\MWTKgram.exe
       - uses: actions/upload-artifact@v7
@@ -316,3 +320,13 @@ jobs:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact\
           retention-days: 14
+
+      - name: Publish release.
+        if: github.ref == 'refs/heads/dev'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "build-${{ github.run_number }}"
+          Compress-Archive -Path artifact\MWTKgram.exe -DestinationPath MWTKgram-x64.zip -Force
+          gh release create $tag MWTKgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MWTKgram (build ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. Unpack and run MWTKgram.exe." --latest
