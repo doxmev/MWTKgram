@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "mwtk/mwtk_playlists.h"
+
 #include "api/api_attached_stickers.h"
 #include "api/api_editing.h"
 #include "api/api_global_privacy.h"
@@ -519,6 +521,12 @@ void AddDocumentActions(
 				menu->st().menu,
 				Menu::RateTranscribeCallbackFactory(item)));
 		}
+	}
+	if (item && document->isAudioFile()) {
+		const auto controller = list->controller();
+		menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+			Mwtk::Playlists::ShowAddToPlaylistBox(controller, contextId);
+		}, &st::menuIconAddToFolder);
 	}
 	AddSaveDocumentAction(menu, item, document, list);
 	AddCopyFilename(

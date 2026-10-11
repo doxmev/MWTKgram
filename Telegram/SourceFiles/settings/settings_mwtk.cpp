@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_overlay.h"
+#include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
 #include "base/timer.h"
 #include "settings/settings_common.h"
@@ -659,6 +660,17 @@ void MwtkSettings::setupContent() {
 		content,
 		rpl::producer<QString>(rpl::single(Utf("Фон рисуется за сообщениями в чате. "
 			"Своё фото или видео копируется в папку клиента, исходник можно удалить."))));
+	Ui::AddSkip(content);
+
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Музыка")));
+	AddActionButton(content, Utf("Мои плейлисты"), [=] {
+		::Mwtk::Playlists::ShowPlaylistsBox(window);
+	});
+	Ui::AddSkip(content);
+	Ui::AddDividerText(
+		content,
+		rpl::producer<QString>(rpl::single(Utf("Добавить трек: правый клик по музыке в чате → «В плейлист MWTK…». "
+			"Плейлист играет треки по порядку или вперемешку, кнопки «вперёд/назад» в плеере идут по нему."))));
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-сообщения и чаты")));

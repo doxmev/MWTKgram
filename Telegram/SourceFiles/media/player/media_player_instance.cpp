@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "media/player/media_player_instance.h"
 
+#include "mwtk/mwtk_playlists.h"
+
 #include "data/data_document.h"
 #include "data/data_session.h"
 #include "data/data_changes.h"
@@ -614,6 +616,8 @@ bool Instance::moveInPlaylist(
 		bool autonext) {
 	if (moveInItem(data, delta, autonext)) {
 		return true;
+	} else if (Mwtk::Playlists::Owns(data->current)) {
+		return Mwtk::Playlists::HandleMove(data->current, delta);
 	} else if (!data->playlistIndex) {
 		return false;
 	}
@@ -808,6 +812,8 @@ bool Instance::previousAvailable(AudioMsgId::Type type) const {
 
 	if (trackInItem(data, -1)) {
 		return true;
+	} else if (Mwtk::Playlists::Owns(data->current)) {
+		return Mwtk::Playlists::MoveAvailable(data->current, -1);
 	} else if (!data->playlistIndex || !data->playlistSlice) {
 		return false;
 	} else if (repeat(data) == RepeatMode::All) {
@@ -827,6 +833,8 @@ bool Instance::nextAvailable(AudioMsgId::Type type) const {
 
 	if (trackInItem(data, 1)) {
 		return true;
+	} else if (Mwtk::Playlists::Owns(data->current)) {
+		return Mwtk::Playlists::MoveAvailable(data->current, 1);
 	} else if (!data->playlistIndex || !data->playlistSlice) {
 		return false;
 	} else if (repeat(data) == RepeatMode::All) {

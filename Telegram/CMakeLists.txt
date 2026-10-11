@@ -2360,6 +2360,8 @@ PRIVATE
     mwtk/mwtk_room_render.h
     mwtk/mwtk_scene.cpp
     mwtk/mwtk_scene.h
+    mwtk/mwtk_playlists.cpp
+    mwtk/mwtk_playlists.h
     mwtk/mwtk_style.cpp
     mwtk/mwtk_style.h
     settings.cpp
