@@ -167,6 +167,62 @@ base::options::toggle OptionButtonsAnimated({
 	.defaultValue = true,
 });
 
+base::options::option<int> OptionSceneBase({
+	.id = kOptionSceneBase,
+	.name = "MWTKgram custom scene base",
+	.description = "Base of the custom 3D scene: forest, neon or space.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionSceneTime({
+	.id = kOptionSceneTime,
+	.name = "MWTKgram custom scene time",
+	.description = "Time of day in the custom 3D scene.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionSceneDensity({
+	.id = kOptionSceneDensity,
+	.name = "MWTKgram custom scene density",
+	.description = "Amount of trees, lines or stars in the custom scene.",
+	.defaultValue = 70,
+});
+
+base::options::option<int> OptionSceneFog({
+	.id = kOptionSceneFog,
+	.name = "MWTKgram custom scene fog",
+	.description = "Fog or glow strength in the custom scene.",
+	.defaultValue = 50,
+});
+
+base::options::option<QString> OptionSceneNotes({
+	.id = kOptionSceneNotes,
+	.name = "MWTKgram custom scene notes",
+	.description = "Texts of the notes on the trees, one per line.",
+	.defaultValue = QString(),
+});
+
+base::options::option<QString> OptionBackgroundPhoto({
+	.id = kOptionBackgroundPhoto,
+	.name = "MWTKgram background photo",
+	.description = "Path of the custom background photo.",
+	.defaultValue = QString(),
+});
+
+base::options::option<QString> OptionBackgroundVideo({
+	.id = kOptionBackgroundVideo,
+	.name = "MWTKgram background video",
+	.description = "Path of the custom background video.",
+	.defaultValue = QString(),
+});
+
+base::options::option<int> OptionBackgroundDim({
+	.id = kOptionBackgroundDim,
+	.name = "MWTKgram background dimming",
+	.description = "Darkening of the photo or video background, percent.",
+	.defaultValue = 30,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -191,6 +247,14 @@ const char kOptionBubblesTint[] = "mwtk-bubbles-tint";
 const char kOptionBubblesOpacity[] = "mwtk-bubbles-opacity";
 const char kOptionCards3d[] = "mwtk-cards-3d";
 const char kOptionBackgroundAnimation[] = "mwtk-background-animation";
+const char kOptionSceneBase[] = "mwtk-scene-base";
+const char kOptionSceneTime[] = "mwtk-scene-time";
+const char kOptionSceneDensity[] = "mwtk-scene-density";
+const char kOptionSceneFog[] = "mwtk-scene-fog";
+const char kOptionSceneNotes[] = "mwtk-scene-notes";
+const char kOptionBackgroundPhoto[] = "mwtk-background-photo";
+const char kOptionBackgroundVideo[] = "mwtk-background-video";
+const char kOptionBackgroundDim[] = "mwtk-background-dim";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -276,7 +340,43 @@ rpl::producer<> RoomConfigChanges() {
 		OptionRoomParallax.changes(),
 		OptionRoomMotion.changes(),
 		OptionQuality.changes(),
-		OptionPalette.changes());
+		OptionPalette.changes(),
+		OptionSceneBase.changes(),
+		OptionSceneTime.changes(),
+		OptionSceneDensity.changes(),
+		OptionSceneFog.changes(),
+		OptionSceneNotes.changes(),
+		OptionBackgroundPhoto.changes(),
+		OptionBackgroundVideo.changes(),
+		OptionBackgroundDim.changes());
+}
+
+QString BackgroundName(int index) {
+	switch (index) {
+	case 0: return QString::fromUtf8("Выкл");
+	case 1: return QString::fromUtf8("Лес");
+	case 2: return QString::fromUtf8("Неон");
+	case 3: return QString::fromUtf8("Своя");
+	case 4: return QString::fromUtf8("Фото");
+	case 5: return QString::fromUtf8("Видео");
+	}
+	return QString();
+}
+
+QString SceneBaseName(int index) {
+	switch (index) {
+	case 1: return QString::fromUtf8("Неон");
+	case 2: return QString::fromUtf8("Космос");
+	}
+	return QString::fromUtf8("Лес");
+}
+
+QString SceneTimeName(int index) {
+	switch (index) {
+	case 1: return QString::fromUtf8("Закат");
+	case 2: return QString::fromUtf8("День");
+	}
+	return QString::fromUtf8("Ночь");
 }
 
 QString BubbleOpacityName(int index) {
@@ -322,6 +422,10 @@ bool OptionValue(const char id[]) {
 
 int OptionInt(const char id[]) {
 	return base::options::value<int>(id);
+}
+
+QString OptionString(const char id[]) {
+	return base::options::value<QString>(id);
 }
 
 } // namespace Mwtk

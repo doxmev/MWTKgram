@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/event_filter.h"
 #include "base/timer.h"
+#include "media/clip/media_clip_reader.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_scene.h"
 #include "ui/style/style_core_scale.h"
@@ -40,10 +41,14 @@ public:
 	[[nodiscard]] rpl::producer<> repaints() const;
 	[[nodiscard]] QPointF shift() const;
 	[[nodiscard]] double time() const;
+	[[nodiscard]] RoomParams currentParams() const;
+	bool paintVideo(QPainter &p, QSize fill);
 
 private:
-	[[nodiscard]] RoomParams currentParams() const;
 	void refresh();
+	void refreshVideo();
+	void videoCallback(::Media::Clip::Notification notification);
+	void scheduleVideoRepaint();
 	void tick();
 	void wake();
 	void render(QSize size);
@@ -59,13 +64,22 @@ private:
 	double _time = 0.;
 	crl::time _lastTick = 0;
 	crl::time _lastRender = 0;
+	::Media::Clip::ReaderPointer _video;
+	QString _videoPath;
+	QSize _videoRequest;
+	base::Timer _videoTimer;
+	crl::time _videoLastRepaint = 0;
 	rpl::lifetime _lifetime;
 
 };
 
 RoomController::RoomController()
 : _timer([=] { tick(); })
-, _renderTimer([=] { render(_wantedSize); }) {
+, _renderTimer([=] { render(_wantedSize); })
+, _videoTimer([=] {
+	_videoLastRepaint = crl::now();
+	_repaints.fire({});
+}) {
 	RoomConfigChanges(
 	) | rpl::on_next([=] {
 		refresh();
@@ -75,9 +89,14 @@ RoomController::RoomController()
 		[=](not_null<QEvent*> e) {
 			switch (e->type()) {
 			case QEvent::MouseMove:
+				wake();
+				break;
 			case QEvent::WindowActivate:
 			case QEvent::ApplicationStateChange:
 				wake();
+				if (_type == RoomType::Video) {
+					_repaints.fire({});
+				}
 				break;
 			case QEvent::KeyPress: {
 				const auto key = static_cast<QKeyEvent*>(e.get());
@@ -128,16 +147,31 @@ RoomParams RoomController::currentParams() const {
 	result.scale = quality.roomScale;
 	result.trees = quality.trees;
 	result.accent = PaletteAt(OptionInt(kOptionPalette), 0.).first;
+	if (_type == RoomType::Custom) {
+		result.base = SceneBase(
+			std::clamp(OptionInt(kOptionSceneBase), 0, kSceneBaseCount - 1));
+		result.timeOfDay = std::clamp(
+			OptionInt(kOptionSceneTime),
+			0,
+			kSceneTimeCount - 1);
+		result.density = std::clamp(OptionInt(kOptionSceneDensity), 0, 100);
+		result.fog = std::clamp(OptionInt(kOptionSceneFog), 0, 100);
+		result.notes = OptionString(kOptionSceneNotes);
+	} else if (_type == RoomType::Photo) {
+		result.photo = OptionString(kOptionBackgroundPhoto);
+		result.dim = std::clamp(OptionInt(kOptionBackgroundDim), 0, 90);
+	} else if (_type == RoomType::Video) {
+		result.dim = std::clamp(OptionInt(kOptionBackgroundDim), 0, 90);
+	}
 	return result;
 }
 
 void RoomController::refresh() {
 	const auto value = EffectsEnabled() ? OptionInt(kOptionRoom) : 0;
-	_type = (value == 1)
-		? RoomType::Forest
-		: (value == 2)
-		? RoomType::Neon
+	_type = (value >= 1 && value < kBackgroundCount)
+		? RoomType(value)
 		: RoomType::None;
+	refreshVideo();
 	if (_type == RoomType::None) {
 		_timer.cancel();
 		_frame = RoomFrame();
@@ -165,7 +199,7 @@ bool RoomController::paint(QPainter &p, QSize fill) {
 		return false;
 	}
 	_wantedSize = fill;
-	if (_frame.layers.empty()) {
+	if (_frame.size.isEmpty()) {
 		render(fill);
 	} else if (_frame.size != fill || !(_frameParams == currentParams())) {
 		if (!_renderTimer.isActive()) {
@@ -174,6 +208,9 @@ bool RoomController::paint(QPainter &p, QSize fill) {
 				: kParamsRenderDelay);
 		}
 	}
+	if (_type == RoomType::Video) {
+		paintVideo(p, fill);
+	}
 	PaintRoomFrame(
 		p,
 		_frame,
@@ -181,6 +218,130 @@ bool RoomController::paint(QPainter &p, QSize fill) {
 		_shift,
 		_time,
 		OptionValue(kOptionRoomMotion));
+	return true;
+}
+
+void RoomController::refreshVideo() {
+	const auto path = (_type == RoomType::Video)
+		? OptionString(kOptionBackgroundVideo)
+		: QString();
+	if (path == _videoPath) {
+		return;
+	}
+	_videoPath = path;
+	_videoRequest = QSize();
+	_videoTimer.cancel();
+	_video.reset();
+	if (!path.isEmpty()) {
+		_video = ::Media::Clip::MakeReader(path, [=](
+				::Media::Clip::Notification notification) {
+			videoCallback(notification);
+		});
+	}
+}
+
+void RoomController::videoCallback(
+		::Media::Clip::Notification notification) {
+	using namespace ::Media::Clip;
+	switch (notification) {
+	case Notification::Reinit: {
+		if (_video && _video->state() == State::Error) {
+			_video.setBad();
+		}
+		if (_video && _video->ready() && !_video->started()) {
+			const auto quality = std::clamp(OptionInt(kOptionQuality), 0, 2);
+			const auto maxSide = (quality == 0)
+				? 640
+				: (quality == 1)
+				? 960
+				: 1280;
+			const auto original = QSize(
+				std::max(_video->width(), 1),
+				std::max(_video->height(), 1));
+			const auto pixels = (original.width() > maxSide
+				|| original.height() > maxSide)
+				? original.scaled(maxSide, maxSide, Qt::KeepAspectRatio)
+				: original;
+			const auto ratio = style::DevicePixelRatio();
+			_videoRequest = QSize(
+				std::max(pixels.width() / ratio, 1),
+				std::max(pixels.height() / ratio, 1));
+			_video->start({ .frame = _videoRequest });
+		}
+		_repaints.fire({});
+	} break;
+	case Notification::Repaint: {
+		if (_video && !_video->currentDisplayed()) {
+			scheduleVideoRepaint();
+		}
+	} break;
+	}
+}
+
+void RoomController::scheduleVideoRepaint() {
+	if (_videoTimer.isActive()) {
+		return;
+	}
+	const auto delay = std::max(
+		crl::time(CurrentQuality().frameDelay),
+		crl::time(33));
+	const auto elapsed = crl::now() - _videoLastRepaint;
+	if (elapsed >= delay) {
+		_videoLastRepaint = crl::now();
+		_repaints.fire({});
+	} else {
+		_videoTimer.callOnce(delay - elapsed);
+	}
+}
+
+bool RoomController::paintVideo(QPainter &p, QSize fill) {
+	if (fill.isEmpty()) {
+		return false;
+	}
+	if (!_video || !_video->started() || _videoRequest.isEmpty()) {
+		p.fillRect(QRect(QPoint(), fill), QColor(12, 10, 18));
+		if (_videoPath.isEmpty() || (!_video && !_video.isBad())) {
+			return false;
+		}
+		p.setPen(QColor(255, 255, 255, 120));
+		p.drawText(
+			QRect(QPoint(), fill),
+			Qt::AlignCenter,
+			_video.isBad()
+				? QString::fromUtf8("Не удалось открыть видео")
+				: QString::fromUtf8("Загрузка видео…"));
+		return false;
+	}
+	const auto active = (QApplication::activeWindow() != nullptr)
+		|| OptionValue(kOptionBackgroundAnimation);
+	const auto frame = _video->current(
+		{ .frame = _videoRequest },
+		active ? crl::now() : 0);
+	if (frame.isNull()) {
+		return false;
+	}
+	constexpr auto kExtra = 0.05;
+	const auto cover = QSizeF(_videoRequest).scaled(
+		QSizeF(fill) * (1. + 2. * kExtra),
+		Qt::KeepAspectRatioByExpanding);
+	const auto offset = QPointF(
+		std::clamp(-_shift.x() / 0.32, -1., 1.) * fill.width() * kExtra,
+		std::clamp(-_shift.y() / 0.18, -1., 1.) * fill.height() * kExtra);
+	const auto target = QRectF(
+		(fill.width() - cover.width()) / 2. + offset.x(),
+		(fill.height() - cover.height()) / 2. + offset.y(),
+		cover.width(),
+		cover.height());
+	p.save();
+	p.setRenderHint(
+		QPainter::SmoothPixmapTransform,
+		CurrentQuality().decorativeMotion);
+	p.drawImage(target, frame);
+	p.restore();
+	const auto dim = std::clamp(OptionInt(kOptionBackgroundDim), 0, 90);
+	if (dim > 0) {
+		p.fillRect(QRect(QPoint(), fill), QColor(0, 0, 0, dim * 255 / 100));
+	}
 	return true;
 }
 
@@ -251,6 +412,14 @@ QPointF RoomCameraShift() {
 
 double RoomTime() {
 	return RoomController::Instance().time();
+}
+
+RoomParams CurrentRoomParams() {
+	return RoomController::Instance().currentParams();
+}
+
+bool PaintRoomVideo(QPainter &p, QSize fill) {
+	return RoomController::Instance().paintVideo(p, fill);
 }
 
 } // namespace Mwtk

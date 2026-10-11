@@ -29,6 +29,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Mwtk {
 namespace {
 
+[[nodiscard]] bool IsForestRoom(RoomType room) {
+	return (room == RoomType::Forest)
+		|| (room == RoomType::Custom
+			&& OptionInt(kOptionSceneBase) == int(SceneBase::Forest));
+}
+
 constexpr auto kButtonGlow = 12;
 
 [[nodiscard]] double CurrentScale() {
@@ -370,7 +376,7 @@ QRegion VisualsWidget::tickFrame(double) {
 	const auto w = width();
 	const auto h = height();
 	const auto pad = int(std::max(w, h) * 0.06);
-	if (room == RoomType::Forest && !_branch.isNull()) {
+	if (IsForestRoom(room) && !_branch.isNull()) {
 		const auto bw = _branchFor.width() + pad * 2;
 		const auto bh = _branchFor.height() + pad * 2;
 		rects.push_back(QRect(-pad, -pad, bw, bh));
@@ -405,7 +411,7 @@ void VisualsWidget::paintFrame(QPainter &p) const {
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing);
 	p.setRenderHint(QPainter::SmoothPixmapTransform);
-	if (room == RoomType::Forest && !_branch.isNull()) {
+	if (IsForestRoom(room) && !_branch.isNull()) {
 		const auto shift = QPointF(
 			-_frameShift.x() * w * 0.12,
 			_frameShift.y() * h * 0.12);

@@ -22,6 +22,15 @@ enum class RoomType {
 	None = 0,
 	Forest = 1,
 	Neon = 2,
+	Custom = 3,
+	Photo = 4,
+	Video = 5,
+};
+
+enum class SceneBase {
+	Forest = 0,
+	Neon = 1,
+	Space = 2,
 };
 
 struct RoomParams {
@@ -33,6 +42,13 @@ struct RoomParams {
 	double scale = 1.;
 	int trees = 460;
 	QColor accent;
+	SceneBase base = SceneBase::Forest;
+	int timeOfDay = 0;
+	int density = 100;
+	int fog = 50;
+	QString notes;
+	QString photo;
+	int dim = 30;
 
 	friend inline bool operator==(
 			const RoomParams &a,
@@ -44,7 +60,14 @@ struct RoomParams {
 			&& (a.ratio == b.ratio)
 			&& (a.scale == b.scale)
 			&& (a.trees == b.trees)
-			&& (a.accent == b.accent);
+			&& (a.accent == b.accent)
+			&& (a.base == b.base)
+			&& (a.timeOfDay == b.timeOfDay)
+			&& (a.density == b.density)
+			&& (a.fog == b.fog)
+			&& (a.notes == b.notes)
+			&& (a.photo == b.photo)
+			&& (a.dim == b.dim);
 	}
 };
 
@@ -60,6 +83,7 @@ struct RoomFrame {
 	double focal = 1.;
 	QColor fog;
 	QImage vignette;
+	bool video = false;
 };
 
 [[nodiscard]] RoomFrame RenderRoom(const RoomParams &params, QSize size);
@@ -75,5 +99,7 @@ void PaintRoomFrame(
 [[nodiscard]] QString RoomName(RoomType type);
 
 [[nodiscard]] QImage RenderBranch(QSize size, double ratio);
+
+[[nodiscard]] bool PhotoAvailable(const QString &path);
 
 } // namespace Mwtk

@@ -19,5 +19,7 @@ namespace Mwtk {
 [[nodiscard]] rpl::producer<> RoomRepaintRequests();
 [[nodiscard]] QPointF RoomCameraShift();
 [[nodiscard]] double RoomTime();
+[[nodiscard]] RoomParams CurrentRoomParams();
+bool PaintRoomVideo(QPainter &p, QSize fill);
 
 } // namespace Mwtk

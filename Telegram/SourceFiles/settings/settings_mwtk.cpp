@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "chat_helpers/stickers_list_widget.h"
 #include "core/application.h"
+#include "core/file_utilities.h"
 #include "dialogs/dialogs_entry.h"
 #include "history/view/history_view_message.h"
 #include "info/profile/info_profile_actions.h"
@@ -19,20 +20,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_room.h"
 #include "base/timer.h"
 #include "settings/settings_common.h"
+#include "settings.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/layers/generic_box.h"
 #include "ui/controls/compose_ai_button_factory.h"
 #include "ui/painter.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
+#include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_peer_menu.h"
 #include "window/window_session_controller.h"
+#include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 #include "styles/style_widgets.h"
 
+#include <QtCore/QDateTime>
+#include <QtCore/QDir>
+#include <QtCore/QFile>
+#include <QtCore/QFileInfo>
 #include <QtGui/QLinearGradient>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
@@ -360,15 +370,8 @@ void AddRoomPreview(not_null<Ui::VerticalLayout*> container) {
 	};
 	const auto state = wrap->lifetime().make_state<State>();
 	const auto render = [=] {
-		auto params = ::Mwtk::RoomParams();
-		params.type = ::Mwtk::CurrentRoom();
-		params.yaw = base::options::value<int>(::Mwtk::kOptionRoomYaw);
-		params.pitch = base::options::value<int>(::Mwtk::kOptionRoomPitch);
-		params.fov = base::options::value<int>(::Mwtk::kOptionRoomFov);
-		params.ratio = style::DevicePixelRatio();
-		params.accent = ::Mwtk::PaletteAt(
-			base::options::value<int>(::Mwtk::kOptionPalette),
-			0.).first;
+		auto params = ::Mwtk::CurrentRoomParams();
+		params.scale = 1.;
 		state->frame = ::Mwtk::RenderRoom(params, wrap->size());
 		wrap->update();
 	};
@@ -391,15 +394,18 @@ void AddRoomPreview(not_null<Ui::VerticalLayout*> container) {
 		auto clip = QPainterPath();
 		clip.addRoundedRect(QRectF(wrap->rect()), radius, radius);
 		p.setClipPath(clip);
-		if (state->frame.layers.empty()) {
+		if (state->frame.layers.empty() && !state->frame.video) {
 			p.fillRect(wrap->rect(), st::windowBgOver);
 			p.setPen(st::windowSubTextFg);
 			p.setFont(st::normalFont);
 			p.drawText(
 				wrap->rect(),
 				Qt::AlignCenter,
-				Utf("3D-комната выключена"));
+				Utf("Фон выключен"));
 			return;
+		}
+		if (state->frame.video) {
+			::Mwtk::PaintRoomVideo(p, wrap->size());
 		}
 		::Mwtk::PaintRoomFrame(
 			p,
@@ -409,6 +415,110 @@ void AddRoomPreview(not_null<Ui::VerticalLayout*> container) {
 			::Mwtk::RoomTime(),
 			base::options::value<bool>(::Mwtk::kOptionRoomMotion));
 	}, wrap->lifetime());
+}
+
+void ChooseBackgroundFile(QPointer<QWidget> parent, bool video) {
+	const auto filter = video
+		? (Utf("Видео (*.mp4 *.webm *.mov *.mkv *.avi *.gif);;")
+			+ FileDialog::AllFilesFilter())
+		: FileDialog::ImagesFilter();
+	FileDialog::GetOpenPath(
+		parent,
+		video ? Utf("Выбери видео для фона") : Utf("Выбери фото для фона"),
+		filter,
+		[=](FileDialog::OpenResult &&result) {
+			if (result.paths.isEmpty()) {
+				return;
+			}
+			const auto source = result.paths.front();
+			const auto info = QFileInfo(source);
+			const auto prefix = video ? u"video_"_q : u"photo_"_q;
+			const auto folder = cWorkingDir() + u"tdata/mwtk_backgrounds/"_q;
+			auto target = source;
+			constexpr auto kMaxCopySize = qint64(300) * 1024 * 1024;
+			if (info.size() < kMaxCopySize && QDir().mkpath(folder)) {
+				const auto entries = QDir(folder).entryInfoList(QDir::Files);
+				for (const auto &entry : entries) {
+					if (entry.fileName().startsWith(prefix)) {
+						QFile::remove(entry.absoluteFilePath());
+					}
+				}
+				const auto copy = folder
+					+ prefix
+					+ QString::number(QDateTime::currentSecsSinceEpoch())
+					+ '.'
+					+ info.suffix().toLower();
+				if (QFile::copy(source, copy)) {
+					target = copy;
+				}
+			}
+			base::options::lookup<QString>(video
+				? ::Mwtk::kOptionBackgroundVideo
+				: ::Mwtk::kOptionBackgroundPhoto).set(target);
+			base::options::lookup<int>(::Mwtk::kOptionRoom).set(video ? 5 : 4);
+		});
+}
+
+void EditSceneNotes(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		auto &option = base::options::lookup<QString>(
+			::Mwtk::kOptionSceneNotes);
+		box->setTitle(rpl::single(Utf("Тексты записок")));
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::newGroupDescription,
+			Ui::InputField::Mode::MultiLine,
+			rpl::single(Utf("Каждая записка — с новой строки")),
+			option.value()));
+		field->setMaxLength(2000);
+		field->setSubmitSettings(Ui::InputField::SubmitSettings::None);
+		box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			rpl::single(Utf("Пусто — стандартные записки (HELP ME и другие).")),
+			st::boxDividerLabel));
+		box->setFocusCallback([=] {
+			field->setFocusFast();
+		});
+		box->addButton(rpl::single(Utf("Сохранить")), [=, &option] {
+			option.set(field->getLastText().trimmed());
+			box->closeBox();
+		});
+		box->addButton(rpl::single(Utf("Отмена")), [=] {
+			box->closeBox();
+		});
+		box->addLeftButton(rpl::single(Utf("Сбросить")), [=, &option] {
+			option.set(QString());
+			box->closeBox();
+		});
+	}));
+}
+
+void AddActionButton(
+		not_null<Ui::VerticalLayout*> container,
+		const QString &title,
+		Fn<void()> callback) {
+	const auto button = container->add(object_ptr<Button>(
+		container,
+		rpl::single(title),
+		st::settingsButtonNoIcon));
+	button->setClickedCallback(std::move(callback));
+}
+
+[[nodiscard]] not_null<Ui::VerticalLayout*> AddRoomTypeSection(
+		not_null<Ui::VerticalLayout*> container,
+		Fn<bool(int)> shown) {
+	auto &option = base::options::lookup<int>(::Mwtk::kOptionRoom);
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	wrap->toggleOn(rpl::single(
+		option.value()
+	) | rpl::then(option.changes() | rpl::map([&option] {
+		return option.value();
+	})) | rpl::map(shown));
+	wrap->finishAnimating();
+	return wrap->entity();
 }
 
 } // namespace
@@ -471,25 +581,84 @@ void MwtkSettings::setupContent() {
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
 
-	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-комнаты")));
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Фон и 3D-сцены")));
 	AddRoomPreview(content);
 	Ui::AddSkip(content);
-	AddSegmented(content, ::Mwtk::kOptionRoom, {
-		::Mwtk::RoomName(::Mwtk::RoomType::None),
-		::Mwtk::RoomName(::Mwtk::RoomType::Forest),
-		Utf("Неон"),
-	});
+	{
+		auto labels = std::vector<QString>();
+		for (auto i = 0; i != ::Mwtk::kBackgroundCount; ++i) {
+			labels.push_back(::Mwtk::BackgroundName(i));
+		}
+		AddSegmented(content, ::Mwtk::kOptionRoom, std::move(labels));
+	}
 	Ui::AddSkip(content);
-	AddSlider(content, Utf("Поворот камеры"), ::Mwtk::kOptionRoomYaw, 0, 359, Utf("°"));
-	AddSlider(content, Utf("Наклон камеры"), ::Mwtk::kOptionRoomPitch, -15, 25, Utf("°"));
-	AddSlider(content, Utf("Угол обзора"), ::Mwtk::kOptionRoomFov, 45, 110, Utf("°"));
-	AddOptionToggle(window, content, Utf("Камера следует за мышью"), ::Mwtk::kOptionRoomParallax);
+
+	const auto custom = AddRoomTypeSection(content, [](int type) {
+		return type == 3;
+	});
+	Ui::AddSubsectionTitle(custom, rpl::single(Utf("Конструктор сцены")));
+	{
+		auto bases = std::vector<QString>();
+		for (auto i = 0; i != ::Mwtk::kSceneBaseCount; ++i) {
+			bases.push_back(::Mwtk::SceneBaseName(i));
+		}
+		AddSegmented(custom, ::Mwtk::kOptionSceneBase, std::move(bases));
+		Ui::AddSkip(custom);
+		auto times = std::vector<QString>();
+		for (auto i = 0; i != ::Mwtk::kSceneTimeCount; ++i) {
+			times.push_back(::Mwtk::SceneTimeName(i));
+		}
+		AddSegmented(custom, ::Mwtk::kOptionSceneTime, std::move(times));
+	}
+	Ui::AddSkip(custom);
+	AddSlider(custom, Utf("Густота: деревья, линии, звёзды"), ::Mwtk::kOptionSceneDensity, 0, 100, Utf("%"));
+	AddSlider(custom, Utf("Туман и свечение"), ::Mwtk::kOptionSceneFog, 0, 100, Utf("%"));
+	AddActionButton(custom, Utf("Тексты записок на деревьях"), [=] {
+		EditSceneNotes(window);
+	});
+	Ui::AddSkip(custom);
+	Ui::AddDividerText(
+		custom,
+		rpl::producer<QString>(rpl::single(Utf("Цвет неона и космоса берётся из цвета MWTKgram. "
+			"Время суток меняет небо и туман в лесу."))));
+	Ui::AddSkip(custom);
+
+	const auto photo = AddRoomTypeSection(content, [](int type) {
+		return type == 4;
+	});
+	AddActionButton(photo, Utf("Выбрать фото…"), [=] {
+		ChooseBackgroundFile(this, false);
+	});
+	AddSlider(photo, Utf("Затемнение"), ::Mwtk::kOptionBackgroundDim, 0, 90, Utf("%"));
+	Ui::AddSkip(photo);
+
+	const auto video = AddRoomTypeSection(content, [](int type) {
+		return type == 5;
+	});
+	AddActionButton(video, Utf("Выбрать видео…"), [=] {
+		ChooseBackgroundFile(this, true);
+	});
+	AddSlider(video, Utf("Затемнение"), ::Mwtk::kOptionBackgroundDim, 0, 90, Utf("%"));
+	Ui::AddSkip(video);
+	Ui::AddDividerText(
+		video,
+		rpl::producer<QString>(rpl::single(Utf("Видео играет без звука по кругу и встаёт на паузу, "
+			"когда окно не активно. Видео-фон нагружает процессор сильнее остальных."))));
+	Ui::AddSkip(video);
+
+	const auto scene = AddRoomTypeSection(content, [](int type) {
+		return (type >= 1 && type <= 3);
+	});
+	AddSlider(scene, Utf("Поворот камеры"), ::Mwtk::kOptionRoomYaw, 0, 359, Utf("°"));
+	AddSlider(scene, Utf("Наклон камеры"), ::Mwtk::kOptionRoomPitch, -15, 25, Utf("°"));
+	AddSlider(scene, Utf("Угол обзора"), ::Mwtk::kOptionRoomFov, 45, 110, Utf("°"));
+	AddOptionToggle(window, content, Utf("Фон следует за мышью"), ::Mwtk::kOptionRoomParallax);
 	AddOptionToggle(window, content, Utf("Покачивание камеры и туман"), ::Mwtk::kOptionRoomMotion);
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
 		content,
-		rpl::producer<QString>(rpl::single(Utf("3D-комната рисуется за сообщениями в чате. "
-			"На слабом компьютере выключи покачивание или саму комнату."))));
+		rpl::producer<QString>(rpl::single(Utf("Фон рисуется за сообщениями в чате. "
+			"Своё фото или видео копируется в папку клиента, исходник можно удалить."))));
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-сообщения и чаты")));

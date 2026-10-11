@@ -6,8 +6,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mwtk/mwtk_room_render.h"
 
+#include <QtCore/QFileInfo>
+#include <QtCore/QHash>
+#include <QtCore/QStringList>
 #include <QtGui/QFont>
 #include <QtGui/QFontMetricsF>
+#include <QtGui/QImageReader>
 #include <QtGui/QLinearGradient>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
@@ -216,19 +220,41 @@ const char *kNotes[] = {
 	return result;
 }
 
-[[nodiscard]] QImage NoteTexture(int index) {
-	static auto cache = std::vector<QImage>(std::size(kNotes));
-	auto &result = cache[index];
-	if (!result.isNull()) {
-		return result;
+[[nodiscard]] std::vector<QString> ParseNotes(const QString &text) {
+	auto result = std::vector<QString>();
+	for (const auto &line : text.split(QChar('\n'))) {
+		const auto trimmed = line.trimmed();
+		if (!trimmed.isEmpty()) {
+			result.push_back(trimmed.left(48));
+		}
+		if (result.size() >= 40) {
+			break;
+		}
 	}
+	if (result.empty()) {
+		for (const auto note : kNotes) {
+			result.push_back(QString::fromUtf8(note));
+		}
+	}
+	return result;
+}
+
+[[nodiscard]] QImage NoteTexture(const QString &text) {
+	static auto cache = QHash<QString, QImage>();
+	if (const auto i = cache.constFind(text); i != cache.constEnd()) {
+		return *i;
+	}
+	if (cache.size() > 64) {
+		cache.clear();
+	}
+	auto &result = cache[text];
 	const auto width = 320;
 	const auto height = 230;
 	result = QImage(width, height, QImage::Format_ARGB32_Premultiplied);
 	result.fill(Qt::transparent);
 	auto p = QPainter(&result);
 	p.setRenderHint(QPainter::Antialiasing);
-	auto random = std::mt19937(77 + index);
+	auto random = std::mt19937(77 + uint(qHash(text) % 1000));
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
 
 	auto paper = QPainterPath();
@@ -265,7 +291,6 @@ const char *kNotes[] = {
 		QStringLiteral("Segoe UI"),
 	});
 	font.setBold(true);
-	const auto text = QString::fromUtf8(kNotes[index]);
 	auto pixel = 78;
 	font.setPixelSize(pixel);
 	while (pixel > 22
@@ -292,18 +317,90 @@ const char *kNotes[] = {
 	return result;
 }
 
-void PaintSky(QPainter &p, const Camera &camera, QSize full, QColor fog) {
+struct ForestLook {
+	QColor skyTop;
+	QColor skyMid;
+	QColor fog;
+	QColor groundNear;
+	QColor groundFar;
+	QColor leafDark;
+	QColor leafLight;
+	QColor trunk;
+	QColor disc;
+	QColor glow;
+	int stars = 260;
+	double discElevation = 0.42;
+	double discSize = 0.035;
+	double fogDensity = 0.05;
+};
+
+[[nodiscard]] ForestLook MakeForestLook(int timeOfDay, int fog) {
+	auto result = ForestLook();
+	switch (timeOfDay) {
+	case 1:
+		result.skyTop = QColor(20, 14, 44);
+		result.skyMid = QColor(156, 66, 72);
+		result.fog = QColor(150, 86, 78);
+		result.groundNear = QColor(42, 28, 32);
+		result.groundFar = QColor(12, 8, 12);
+		result.leafDark = QColor(10, 14, 14);
+		result.leafLight = QColor(22, 26, 24);
+		result.trunk = QColor(20, 12, 10);
+		result.disc = QColor(255, 178, 96);
+		result.glow = QColor(255, 120, 70, 130);
+		result.stars = 50;
+		result.discElevation = 0.05;
+		result.discSize = 0.06;
+		break;
+	case 2:
+		result.skyTop = QColor(58, 118, 190);
+		result.skyMid = QColor(150, 192, 224);
+		result.fog = QColor(176, 198, 210);
+		result.groundNear = QColor(72, 94, 70);
+		result.groundFar = QColor(34, 50, 36);
+		result.leafDark = QColor(20, 56, 34);
+		result.leafLight = QColor(38, 86, 52);
+		result.trunk = QColor(62, 44, 30);
+		result.disc = QColor(255, 250, 226);
+		result.glow = QColor(255, 255, 220, 120);
+		result.stars = 0;
+		result.discElevation = 0.8;
+		result.discSize = 0.03;
+		break;
+	default:
+		result.skyTop = QColor(3, 5, 9);
+		result.skyMid = QColor(16, 24, 30);
+		result.fog = QColor(40, 54, 60);
+		result.groundNear = QColor(22, 30, 32);
+		result.groundFar = QColor(8, 11, 12);
+		result.leafDark = QColor(14, 34, 24);
+		result.leafLight = QColor(24, 50, 36);
+		result.trunk = QColor(28, 20, 15);
+		result.disc = QColor(214, 222, 228);
+		result.glow = QColor(150, 170, 190, 90);
+		break;
+	}
+	result.fogDensity = 0.05 * Clamp(fog, 0, 100) / 50.;
+	return result;
+}
+
+void PaintSky(
+		QPainter &p,
+		const Camera &camera,
+		QSize full,
+		const ForestLook &look) {
+	const auto fog = look.fog;
 	const auto horizon = camera.horizonY();
 	auto sky = QLinearGradient(0, horizon - camera.focal() * 1.2, 0, horizon);
-	sky.setColorAt(0., QColor(3, 5, 9));
-	sky.setColorAt(0.75, QColor(16, 24, 30));
+	sky.setColorAt(0., look.skyTop);
+	sky.setColorAt(0.75, look.skyMid);
 	sky.setColorAt(1., fog);
 	p.fillRect(QRect(QPoint(), full), sky);
 
 	auto random = std::mt19937(4242);
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
 	p.setPen(Qt::NoPen);
-	for (auto i = 0; i != 260; ++i) {
+	for (auto i = 0; i != look.stars; ++i) {
 		const auto azimuth = unit(random) * 2. * kPi;
 		const auto elevation = 0.12 + unit(random) * 1.3;
 		const auto direction = Vec{
@@ -323,27 +420,27 @@ void PaintSky(QPainter &p, const Camera &camera, QSize full, QColor fog) {
 
 	auto depth = 0.;
 	const auto moonAzimuth = 0.7;
-	const auto moonElevation = 0.42;
+	const auto moonElevation = look.discElevation;
 	const auto moon = camera.project({
 		std::sin(moonAzimuth) * std::cos(moonElevation) * 900.,
 		kEyeHeight + std::sin(moonElevation) * 900.,
 		std::cos(moonAzimuth) * std::cos(moonElevation) * 900.,
 	}, &depth);
 	if (depth > 1.) {
-		const auto r = camera.focal() * 0.035;
+		const auto r = camera.focal() * look.discSize;
 		auto glow = QRadialGradient(moon, r * 9.);
-		glow.setColorAt(0., QColor(150, 170, 190, 90));
-		glow.setColorAt(1., QColor(150, 170, 190, 0));
+		glow.setColorAt(0., look.glow);
+		glow.setColorAt(1., WithAlpha(look.glow, 0.));
 		p.setBrush(glow);
 		p.drawEllipse(moon, r * 9., r * 9.);
-		p.setBrush(QColor(214, 222, 228));
+		p.setBrush(look.disc);
 		p.drawEllipse(moon, r, r);
 	}
 
 	auto ground = QLinearGradient(0, horizon, 0, full.height());
 	ground.setColorAt(0., fog);
-	ground.setColorAt(0.08, QColor(22, 30, 32));
-	ground.setColorAt(1., QColor(8, 11, 12));
+	ground.setColorAt(0.08, look.groundNear);
+	ground.setColorAt(1., look.groundFar);
 	p.fillRect(
 		QRectF(0, horizon, full.width(), std::max(0., full.height() - horizon)),
 		ground);
@@ -354,18 +451,20 @@ void PaintTree(
 		const Camera &camera,
 		const Tree &tree,
 		double depth,
-		QColor fog) {
-	const auto fogAmount = 1. - std::exp(-depth * 0.05);
+		const ForestLook &look,
+		const std::vector<QString> &notes) {
+	const auto fog = look.fog;
+	const auto fogAmount = 1. - std::exp(-depth * look.fogDensity);
 	const auto k = camera.focal() / std::max(depth, kNearPlane);
 	const auto base = camera.project({ tree.x, 0., tree.z });
 	const auto trunkTop = camera.project({ tree.x, tree.height * 0.4, tree.z });
 
-	const auto trunk = Mix(QColor(28, 20, 15), fog, fogAmount);
+	const auto trunk = Mix(look.trunk, fog, fogAmount);
 	p.setPen(QPen(trunk, std::max(1., 0.28 * k), Qt::SolidLine, Qt::FlatCap));
 	p.drawLine(base, trunkTop);
 
 	const auto leaf = Mix(
-		Mix(QColor(14, 34, 24), QColor(24, 50, 36), tree.shade),
+		Mix(look.leafDark, look.leafLight, tree.shade),
 		fog,
 		fogAmount);
 	p.setPen(Qt::NoPen);
@@ -400,7 +499,7 @@ void PaintTree(
 		p.drawPolygon(polygon);
 	}
 
-	if (tree.note < 0 || depth > 16.) {
+	if (tree.note < 0 || depth > 16. || notes.empty()) {
 		return;
 	}
 	const auto length = std::sqrt(tree.x * tree.x + tree.z * tree.z);
@@ -425,7 +524,7 @@ void PaintTree(
 	};
 	auto quad = QPolygonF();
 	quad << corner(-1, 1) << corner(1, 1) << corner(1, -1) << corner(-1, -1);
-	const auto texture = NoteTexture(tree.note);
+	const auto texture = NoteTexture(notes[tree.note % int(notes.size())]);
 	auto source = QPolygonF();
 	source << QPointF(0, 0)
 		<< QPointF(texture.width(), 0)
@@ -450,7 +549,9 @@ void RenderForest(
 		const RoomParams &params,
 		const Camera &camera,
 		QSize full) {
-	const auto fog = QColor(40, 54, 60);
+	const auto look = MakeForestLook(params.timeOfDay, params.fog);
+	const auto notes = ParseNotes(params.notes);
+	const auto fog = look.fog;
 	frame.fog = fog;
 	struct Visible {
 		const Tree *tree = nullptr;
@@ -458,7 +559,10 @@ void RenderForest(
 	};
 	auto visible = std::vector<Visible>();
 	const auto &trees = ForestTrees();
-	const auto limit = std::clamp(params.trees, 5, int(trees.size()));
+	const auto limit = std::clamp(
+		int(std::round(params.trees * Clamp(params.density, 0, 100) / 100.)),
+		5,
+		int(trees.size()));
 	for (auto index = 0; index != limit; ++index) {
 		const auto &tree = trees[index];
 		const auto camera3 = camera.toCamera({ tree.x, tree.height * 0.5, tree.z });
@@ -501,7 +605,7 @@ void RenderForest(
 		auto image = makeImage();
 		auto p = QPainter(&image);
 		p.setRenderHint(QPainter::Antialiasing);
-		PaintSky(p, camera, full, fog);
+		PaintSky(p, camera, full, look);
 		p.end();
 		frame.layers.push_back({ std::move(image), 0. });
 	}
@@ -511,7 +615,7 @@ void RenderForest(
 		p.setRenderHint(QPainter::Antialiasing);
 		for (const auto &entry : visible) {
 			if (entry.depth >= band.from && entry.depth < band.till) {
-				PaintTree(p, camera, *entry.tree, entry.depth, fog);
+				PaintTree(p, camera, *entry.tree, entry.depth, look, notes);
 			}
 		}
 		if (band.depth > 20.) {
@@ -533,7 +637,8 @@ void DrawNeonLine(
 		Vec a,
 		Vec b,
 		const QColor &color,
-		double width) {
+		double width,
+		double glow = 1.) {
 	auto ca = camera.toCamera(a);
 	auto cb = camera.toCamera(b);
 	if (!camera.clipLine(ca, cb)) {
@@ -543,7 +648,7 @@ void DrawNeonLine(
 	const auto fade = std::exp(-depth * 0.07);
 	const auto pa = camera.fromCamera(ca);
 	const auto pb = camera.fromCamera(cb);
-	p.setPen(QPen(WithAlpha(color, 0.18 * fade), width * 4., Qt::SolidLine, Qt::RoundCap));
+	p.setPen(QPen(WithAlpha(color, 0.18 * glow * fade), width * 4., Qt::SolidLine, Qt::RoundCap));
 	p.drawLine(pa, pb);
 	p.setPen(QPen(WithAlpha(color, 0.9 * fade), width, Qt::SolidLine, Qt::RoundCap));
 	p.drawLine(pa, pb);
@@ -605,26 +710,282 @@ void RenderNeon(
 		p.restore();
 	}
 
-	for (auto i = -8; i <= 8; ++i) {
-		const auto v = double(i);
-		DrawNeonLine(p, camera, { v, 0., -kHalf }, { v, 0., kHalf }, floorColor, line);
-		DrawNeonLine(p, camera, { -kHalf, 0., v }, { kHalf, 0., v }, floorColor, line);
-		DrawNeonLine(p, camera, { v, kHeight, -kHalf }, { v, kHeight, kHalf }, ceilColor, line * 0.7);
-		DrawNeonLine(p, camera, { -kHalf, kHeight, v }, { kHalf, kHeight, v }, ceilColor, line * 0.7);
+	const auto cells = 4 + int(std::round(Clamp(params.density, 0, 100) * 0.12));
+	const auto step = 2. * kHalf / cells;
+	const auto glow = Clamp(params.fog, 0, 100) / 50.;
+	for (auto i = 0; i <= cells; ++i) {
+		const auto v = -kHalf + i * step;
+		DrawNeonLine(p, camera, { v, 0., -kHalf }, { v, 0., kHalf }, floorColor, line, glow);
+		DrawNeonLine(p, camera, { -kHalf, 0., v }, { kHalf, 0., v }, floorColor, line, glow);
+		DrawNeonLine(p, camera, { v, kHeight, -kHalf }, { v, kHeight, kHalf }, ceilColor, line * 0.7, glow);
+		DrawNeonLine(p, camera, { -kHalf, kHeight, v }, { kHalf, kHeight, v }, ceilColor, line * 0.7, glow);
 		for (const auto wall : { -kHalf, kHalf }) {
-			DrawNeonLine(p, camera, { wall, 0., v }, { wall, kHeight, v }, wallColor, line * 0.8);
-			DrawNeonLine(p, camera, { v, 0., wall }, { v, kHeight, wall }, wallColor, line * 0.8);
+			DrawNeonLine(p, camera, { wall, 0., v }, { wall, kHeight, v }, wallColor, line * 0.8, glow);
+			DrawNeonLine(p, camera, { v, 0., wall }, { v, kHeight, wall }, wallColor, line * 0.8, glow);
 		}
 	}
-	for (auto j = 1; j != 6; ++j) {
-		const auto y = j * kHeight / 6.;
+	const auto rows = std::max(2, int(std::round(cells * 6. / 16.)));
+	for (auto j = 1; j != rows; ++j) {
+		const auto y = j * kHeight / rows;
 		for (const auto wall : { -kHalf, kHalf }) {
-			DrawNeonLine(p, camera, { wall, y, -kHalf }, { wall, y, kHalf }, wallColor, line * 0.6);
-			DrawNeonLine(p, camera, { -kHalf, y, wall }, { kHalf, y, wall }, wallColor, line * 0.6);
+			DrawNeonLine(p, camera, { wall, y, -kHalf }, { wall, y, kHalf }, wallColor, line * 0.6, glow);
+			DrawNeonLine(p, camera, { -kHalf, y, wall }, { kHalf, y, wall }, wallColor, line * 0.6, glow);
 		}
 	}
 	p.end();
 	frame.layers.push_back({ std::move(image), 6. });
+}
+
+[[nodiscard]] QImage MakeLayerImage(const RoomParams &params, QSize full) {
+	auto image = QImage(
+		QSize(
+			int(std::ceil(full.width() * RenderRatio(params))),
+			int(std::ceil(full.height() * RenderRatio(params)))),
+		QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(RenderRatio(params));
+	image.fill(Qt::transparent);
+	return image;
+}
+
+[[nodiscard]] Vec SkyDirection(double azimuth, double elevation, double distance) {
+	return {
+		std::sin(azimuth) * std::cos(elevation) * distance,
+		kEyeHeight + std::sin(elevation) * distance,
+		std::cos(azimuth) * std::cos(elevation) * distance,
+	};
+}
+
+void PaintPlanet(
+		QPainter &p,
+		const Camera &camera,
+		Vec position,
+		double radius,
+		QColor color,
+		bool ring) {
+	auto depth = 0.;
+	const auto center = camera.project(position, &depth);
+	if (depth <= 0.5) {
+		return;
+	}
+	const auto r = radius * camera.focal() / depth;
+	auto rotate = QTransform();
+	rotate.translate(center.x(), center.y());
+	rotate.rotate(-16.);
+	const auto rx = r * 2.15;
+	const auto ry = r * 0.42;
+	auto ringPath = QPainterPath();
+	ringPath.addEllipse(QPointF(), rx, ry);
+	auto innerPath = QPainterPath();
+	innerPath.addEllipse(QPointF(), rx * 0.72, ry * 0.72);
+	ringPath = rotate.map(ringPath.subtracted(innerPath));
+	auto backHalf = QPainterPath();
+	backHalf.addRect(QRectF(-rx - 2, -ry - 2, 2 * rx + 4, ry + 2));
+	auto planetPath = QPainterPath();
+	planetPath.addEllipse(center, r, r);
+	const auto hidden = planetPath.intersected(rotate.map(backHalf));
+	const auto ringColor = Mix(color, QColor(255, 236, 200), 0.45);
+	p.setPen(Qt::NoPen);
+	auto halo = QRadialGradient(center, r * 1.45);
+	halo.setColorAt(0.65, WithAlpha(color, 0.35));
+	halo.setColorAt(1., WithAlpha(color, 0.));
+	p.setBrush(halo);
+	p.drawEllipse(center, r * 1.45, r * 1.45);
+	auto body = QRadialGradient(center - QPointF(r * 0.45, r * 0.45), r * 1.6);
+	body.setColorAt(0., Mix(color, QColor(255, 255, 255), 0.35));
+	body.setColorAt(0.45, color);
+	body.setColorAt(1., Mix(color, QColor(0, 0, 0), 0.88));
+	p.setBrush(body);
+	p.drawEllipse(center, r, r);
+	p.save();
+	p.setClipPath(planetPath);
+	for (auto i = 0; i != 4; ++i) {
+		const auto y = center.y() - r * 0.55 + i * r * 0.33;
+		p.setBrush(WithAlpha(Mix(color, QColor(0, 0, 0), 0.4), 0.22));
+		p.drawRect(QRectF(center.x() - r, y, 2 * r, r * 0.09));
+	}
+	p.restore();
+	if (ring) {
+		auto ringFill = QLinearGradient(
+			center - QPointF(rx, 0.),
+			center + QPointF(rx, 0.));
+		ringFill.setColorAt(0., WithAlpha(ringColor, 0.45));
+		ringFill.setColorAt(0.5, WithAlpha(ringColor, 0.8));
+		ringFill.setColorAt(1., WithAlpha(ringColor, 0.45));
+		p.setBrush(ringFill);
+		p.drawPath(ringPath.subtracted(hidden));
+	}
+}
+
+void RenderSpace(
+		RoomFrame &frame,
+		const RoomParams &params,
+		const Camera &camera,
+		QSize full) {
+	frame.fog = QColor(16, 14, 40);
+	const auto accent = params.accent.isValid()
+		? params.accent
+		: QColor(255, 47, 208);
+	auto second = accent.toHsv();
+	second.setHsv(
+		(std::max(second.hue(), 0) + 150) % 360,
+		std::max(second.saturation(), 120),
+		std::max(second.value(), 180));
+	const auto glow = Clamp(params.fog, 0, 100) / 50.;
+	const auto density = Clamp(params.density, 0, 100) / 100.;
+	auto random = std::mt19937(2024);
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		auto background = QLinearGradient(0, 0, 0, full.height());
+		background.setColorAt(0., QColor(2, 3, 12));
+		background.setColorAt(1., QColor(10, 6, 24));
+		p.fillRect(QRect(QPoint(), full), background);
+		p.setPen(Qt::NoPen);
+		for (auto i = 0; i != 7; ++i) {
+			const auto azimuth = (i / 7.) * 2. * kPi + unit(random) * 0.6;
+			const auto elevation = (unit(random) - 0.35) * 0.9;
+			auto depth = 0.;
+			const auto center = camera.project(
+				SkyDirection(azimuth, elevation, 900.),
+				&depth);
+			if (depth <= 1.) {
+				continue;
+			}
+			const auto r = camera.focal() * (0.35 + unit(random) * 0.45);
+			const auto color = (i % 2) ? QColor(second) : accent;
+			auto cloud = QRadialGradient(center, r);
+			cloud.setColorAt(0., WithAlpha(color, 0.3 * glow));
+			cloud.setColorAt(0.5, WithAlpha(color, 0.12 * glow));
+			cloud.setColorAt(1., WithAlpha(color, 0.));
+			p.setBrush(cloud);
+			p.drawEllipse(center, r, r);
+		}
+		const auto stars = 160 + int(density * 900);
+		for (auto i = 0; i != stars; ++i) {
+			auto depth = 0.;
+			const auto point = camera.project(SkyDirection(
+				unit(random) * 2. * kPi,
+				(unit(random) * 2. - 1.) * 1.45,
+				900.), &depth);
+			if (depth <= 1.) {
+				continue;
+			}
+			const auto r = 0.4 + unit(random) * 0.8;
+			const auto tint = Mix(QColor(210, 220, 255), accent, unit(random) * 0.25);
+			p.setBrush(WithAlpha(tint, 0.25 + unit(random) * 0.6));
+			p.drawEllipse(point, r, r);
+		}
+		p.end();
+		frame.layers.push_back({ std::move(image), 0. });
+	}
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto bright = 12 + int(density * 40);
+		for (auto i = 0; i != bright; ++i) {
+			auto depth = 0.;
+			const auto point = camera.project(SkyDirection(
+				unit(random) * 2. * kPi,
+				(unit(random) * 2. - 1.) * 1.3,
+				60.), &depth);
+			if (depth <= 1.) {
+				continue;
+			}
+			const auto r = 1.2 + unit(random) * 1.6;
+			const auto color = Mix(QColor(255, 255, 255), (i % 3) ? accent : QColor(second), 0.3);
+			auto halo = QRadialGradient(point, r * 5.);
+			halo.setColorAt(0., WithAlpha(color, 0.45));
+			halo.setColorAt(1., WithAlpha(color, 0.));
+			p.setPen(Qt::NoPen);
+			p.setBrush(halo);
+			p.drawEllipse(point, r * 5., r * 5.);
+			p.setPen(QPen(WithAlpha(color, 0.5), 1.));
+			p.drawLine(point - QPointF(r * 4., 0.), point + QPointF(r * 4., 0.));
+			p.drawLine(point - QPointF(0., r * 4.), point + QPointF(0., r * 4.));
+			p.setPen(Qt::NoPen);
+			p.setBrush(QColor(255, 255, 255, 230));
+			p.drawEllipse(point, r * 0.6, r * 0.6);
+		}
+		p.end();
+		frame.layers.push_back({ std::move(image), 30. });
+	}
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		PaintPlanet(p, camera, { 7., 5.5, 16. }, 3.2, accent, true);
+		PaintPlanet(p, camera, { -6.5, 3.2, 11. }, 0.9, QColor(second), false);
+		PaintPlanet(p, camera, { 12., 1.2, -14. }, 2.4, Mix(accent, QColor(second), 0.5), true);
+		PaintPlanet(p, camera, { -14., 6., -8. }, 1.6, QColor(second), false);
+		p.end();
+		frame.layers.push_back({ std::move(image), 9. });
+	}
+}
+
+[[nodiscard]] QImage LoadPhoto(const QString &path) {
+	static auto cachedPath = QString();
+	static auto cached = QImage();
+	if (path == cachedPath) {
+		return cached;
+	}
+	auto reader = QImageReader(path);
+	reader.setAutoTransform(true);
+	const auto size = reader.size();
+	constexpr auto kMaxSide = 3840;
+	if (size.isValid()
+		&& (size.width() > kMaxSide || size.height() > kMaxSide)) {
+		reader.setScaledSize(size.scaled(
+			kMaxSide,
+			kMaxSide,
+			Qt::KeepAspectRatio));
+	}
+	cachedPath = path;
+	cached = reader.read();
+	return cached;
+}
+
+void RenderPhoto(
+		RoomFrame &frame,
+		const RoomParams &params,
+		QSize full) {
+	frame.fog = QColor(0, 0, 0);
+	const auto ratio = std::max(params.ratio, 0.5);
+	const auto target = QSize(
+		int(std::ceil(full.width() * ratio)),
+		int(std::ceil(full.height() * ratio)));
+	auto image = QImage(target, QImage::Format_ARGB32_Premultiplied);
+	image.setDevicePixelRatio(ratio);
+	image.fill(QColor(12, 10, 18));
+	const auto source = LoadPhoto(params.photo);
+	auto p = QPainter(&image);
+	if (!source.isNull()) {
+		p.setRenderHint(QPainter::SmoothPixmapTransform);
+		const auto scaled = source.size().scaled(
+			full,
+			Qt::KeepAspectRatioByExpanding);
+		const auto rect = QRectF(
+			(full.width() - scaled.width()) / 2.,
+			(full.height() - scaled.height()) / 2.,
+			scaled.width(),
+			scaled.height());
+		p.drawImage(rect, source);
+	} else {
+		p.setPen(QColor(255, 255, 255, 120));
+		p.drawText(
+			QRect(QPoint(), full),
+			Qt::AlignCenter,
+			QString::fromUtf8("Фото не выбрано"));
+	}
+	const auto dim = Clamp(params.dim, 0, 90) / 100.;
+	if (dim > 0.) {
+		p.fillRect(QRect(QPoint(), full), QColor(0, 0, 0, int(dim * 255)));
+	}
+	p.end();
+	frame.layers.push_back({ std::move(image), 9. });
 }
 
 } // namespace
@@ -634,8 +995,15 @@ QString RoomName(RoomType type) {
 	case RoomType::None: return QString::fromUtf8("Выкл");
 	case RoomType::Forest: return QString::fromUtf8("Еловый лес");
 	case RoomType::Neon: return QString::fromUtf8("Неоновая комната");
+	case RoomType::Custom: return QString::fromUtf8("Своя сцена");
+	case RoomType::Photo: return QString::fromUtf8("Фото");
+	case RoomType::Video: return QString::fromUtf8("Видео");
 	}
 	return QString();
+}
+
+bool PhotoAvailable(const QString &path) {
+	return !path.isEmpty() && QFileInfo(path).isFile();
 }
 
 QImage RenderBranch(QSize size, double ratio) {
@@ -734,10 +1102,35 @@ RoomFrame RenderRoom(const RoomParams &params, QSize size) {
 	const auto full = size + QSize(result.margin * 2, result.margin * 2);
 	const auto camera = Camera(params, size, result.margin);
 	result.focal = camera.focal();
-	if (params.type == RoomType::Forest) {
+	switch (params.type) {
+	case RoomType::Forest:
 		RenderForest(result, params, camera, full);
-	} else {
+		break;
+	case RoomType::Neon:
 		RenderNeon(result, params, camera, full);
+		break;
+	case RoomType::Custom:
+		switch (params.base) {
+		case SceneBase::Neon:
+			RenderNeon(result, params, camera, full);
+			break;
+		case SceneBase::Space:
+			RenderSpace(result, params, camera, full);
+			break;
+		default:
+			RenderForest(result, params, camera, full);
+			break;
+		}
+		break;
+	case RoomType::Photo:
+		RenderPhoto(result, params, full);
+		break;
+	case RoomType::Video:
+		result.fog = QColor(0, 0, 0);
+		result.video = true;
+		break;
+	case RoomType::None:
+		break;
 	}
 	const auto target = QSize(
 		int(std::ceil(full.width() * params.ratio)),
@@ -777,7 +1170,7 @@ void PaintRoomFrame(
 		QPointF cameraShift,
 		double time,
 		bool motion) {
-	if (frame.layers.empty()) {
+	if (frame.layers.empty() && !frame.video) {
 		return;
 	}
 	p.save();

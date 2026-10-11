@@ -34,6 +34,21 @@ extern const char kOptionBubblesTint[];
 extern const char kOptionBubblesOpacity[];
 extern const char kOptionCards3d[];
 extern const char kOptionBackgroundAnimation[];
+extern const char kOptionSceneBase[];
+extern const char kOptionSceneTime[];
+extern const char kOptionSceneDensity[];
+extern const char kOptionSceneFog[];
+extern const char kOptionSceneNotes[];
+extern const char kOptionBackgroundPhoto[];
+extern const char kOptionBackgroundVideo[];
+extern const char kOptionBackgroundDim[];
+
+inline constexpr auto kBackgroundCount = 6;
+inline constexpr auto kSceneBaseCount = 3;
+inline constexpr auto kSceneTimeCount = 3;
+[[nodiscard]] QString BackgroundName(int index);
+[[nodiscard]] QString SceneBaseName(int index);
+[[nodiscard]] QString SceneTimeName(int index);
 
 inline constexpr auto kIntensityCount = 3;
 
@@ -73,5 +88,6 @@ struct CardStyle {
 
 [[nodiscard]] bool OptionValue(const char id[]);
 [[nodiscard]] int OptionInt(const char id[]);
+[[nodiscard]] QString OptionString(const char id[]);
 
 } // namespace Mwtk
