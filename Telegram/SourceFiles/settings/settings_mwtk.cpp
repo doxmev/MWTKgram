@@ -492,6 +492,20 @@ void MwtkSettings::setupContent() {
 			"На слабом компьютере выключи покачивание или саму комнату."))));
 	Ui::AddSkip(content);
 
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-сообщения и чаты")));
+	AddOptionToggle(window, content, Utf("Объёмные сообщения"), ::Mwtk::kOptionBubbles3d);
+	AddOptionToggle(window, content, Utf("Сообщения в цвет темы"), ::Mwtk::kOptionBubblesTint);
+	AddOptionToggle(window, content, Utf("Объёмные карточки чатов"), ::Mwtk::kOptionCards3d);
+	Ui::AddSkip(content);
+	AddSegmented(content, ::Mwtk::kOptionBubblesOpacity, {
+		::Mwtk::BubbleOpacityName(0),
+		::Mwtk::BubbleOpacityName(1),
+		::Mwtk::BubbleOpacityName(2),
+	});
+	Ui::AddSkip(content);
+	Ui::AddDivider(content);
+	Ui::AddSkip(content);
+
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-интерфейс")));
 	AddOptionToggle(window, content, Utf("Интерфейс внутри 3D-сцены"), ::Mwtk::kOptionUiScene);
 	AddOptionToggle(window, content, Utf("Объёмные кнопки"), ::Mwtk::kOptionButtons3d);

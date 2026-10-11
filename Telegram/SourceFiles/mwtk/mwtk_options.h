@@ -29,6 +29,10 @@ extern const char kOptionButtons3d[];
 extern const char kOptionButtonsAnimated[];
 extern const char kOptionQuality[];
 extern const char kOptionEffects[];
+extern const char kOptionBubbles3d[];
+extern const char kOptionBubblesTint[];
+extern const char kOptionBubblesOpacity[];
+extern const char kOptionCards3d[];
 extern const char kOptionBackgroundAnimation[];
 
 inline constexpr auto kIntensityCount = 3;
@@ -55,6 +59,16 @@ void ToggleEffects();
 [[nodiscard]] SceneConfig CurrentConfig(double scale);
 [[nodiscard]] rpl::producer<> ConfigChanges();
 [[nodiscard]] rpl::producer<> RoomConfigChanges();
+[[nodiscard]] rpl::producer<> ChatStyleChanges();
+
+inline constexpr auto kBubbleOpacityCount = 3;
+[[nodiscard]] QString BubbleOpacityName(int index);
+
+struct CardStyle {
+	bool enabled = false;
+	QColor accent;
+};
+[[nodiscard]] CardStyle CurrentCardStyle();
 [[nodiscard]] rpl::producer<> InterfaceConfigChanges();
 
 [[nodiscard]] bool OptionValue(const char id[]);

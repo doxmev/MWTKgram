@@ -104,6 +104,34 @@ base::options::toggle OptionEffects({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionBubbles3d({
+	.id = kOptionBubbles3d,
+	.name = "MWTKgram 3D message bubbles",
+	.description = "Volumetric message bubbles.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionBubblesTint({
+	.id = kOptionBubblesTint,
+	.name = "MWTKgram tinted message bubbles",
+	.description = "Message bubbles follow the MWTKgram color.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionBubblesOpacity({
+	.id = kOptionBubblesOpacity,
+	.name = "MWTKgram message bubbles opacity",
+	.description = "Message bubbles translucency.",
+	.defaultValue = 1,
+});
+
+base::options::toggle OptionCards3d({
+	.id = kOptionCards3d,
+	.name = "MWTKgram 3D chat list",
+	.description = "Chat list rows as volumetric cards.",
+	.defaultValue = true,
+});
+
 base::options::option<int> OptionQuality({
 	.id = kOptionQuality,
 	.name = "MWTKgram graphics quality",
@@ -158,6 +186,10 @@ const char kOptionButtons3d[] = "mwtk-buttons-3d";
 const char kOptionButtonsAnimated[] = "mwtk-buttons-animated";
 const char kOptionQuality[] = "mwtk-quality";
 const char kOptionEffects[] = "mwtk-effects";
+const char kOptionBubbles3d[] = "mwtk-bubbles-3d";
+const char kOptionBubblesTint[] = "mwtk-bubbles-tint";
+const char kOptionBubblesOpacity[] = "mwtk-bubbles-opacity";
+const char kOptionCards3d[] = "mwtk-cards-3d";
 const char kOptionBackgroundAnimation[] = "mwtk-background-animation";
 
 QString QualityName(int index) {
@@ -244,6 +276,33 @@ rpl::producer<> RoomConfigChanges() {
 		OptionRoomParallax.changes(),
 		OptionRoomMotion.changes(),
 		OptionQuality.changes(),
+		OptionPalette.changes());
+}
+
+QString BubbleOpacityName(int index) {
+	switch (index) {
+	case 0: return QString::fromUtf8("Плотные");
+	case 2: return QString::fromUtf8("Стекло");
+	}
+	return QString::fromUtf8("Полупрозрачные");
+}
+
+CardStyle CurrentCardStyle() {
+	auto result = CardStyle();
+	result.enabled = OptionEffects.value() && OptionCards3d.value();
+	result.accent = PaletteAt(
+		std::clamp(OptionPalette.value(), 0, PalettesCount() - 1),
+		0.).first;
+	return result;
+}
+
+rpl::producer<> ChatStyleChanges() {
+	return rpl::merge(
+		OptionEffects.changes(),
+		OptionBubbles3d.changes(),
+		OptionBubblesTint.changes(),
+		OptionBubblesOpacity.changes(),
+		OptionCards3d.changes(),
 		OptionPalette.changes());
 }
 

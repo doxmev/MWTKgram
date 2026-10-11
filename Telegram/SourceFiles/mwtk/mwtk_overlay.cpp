@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
+#include "mwtk/mwtk_style.h"
 #include "ui/abstract_button.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
@@ -548,6 +549,7 @@ void VisualsWidget::paintEvent(QPaintEvent *e) {
 }
 
 void SetupOverlay(not_null<Ui::RpWidget*> body) {
+	SetupChatStyle();
 	const auto overlay = Ui::CreateChild<VisualsWidget>(body.get(), true);
 	body->sizeValue(
 	) | rpl::on_next([=](QSize size) {

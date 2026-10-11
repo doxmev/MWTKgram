@@ -129,6 +129,18 @@ struct BubbleWithGaps {
 	not_null<TornEdgeCache*> torn;
 };
 
+struct BubbleStyleOverride {
+	bool enabled = false;
+	bool volumetric = false;
+	QColor outTint;
+	QColor inTint;
+	float64 tintStrength = 0.;
+	float64 opacity = 1.;
+};
+
+void SetBubbleStyleOverride(BubbleStyleOverride value);
+[[nodiscard]] const BubbleStyleOverride &CurrentBubbleStyleOverride();
+
 void PaintBubble(QPainter &p, const SimpleBubble &args);
 void PaintBubble(QPainter &p, const ComplexBubble &args);
 void PaintBubble(QPainter &p, const BubbleWithGaps &args);

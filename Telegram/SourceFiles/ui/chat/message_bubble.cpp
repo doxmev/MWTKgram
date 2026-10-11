@@ -14,6 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_chat.h"
 #include "styles/style_chat_style.h"
 
+#include <QtGui/QLinearGradient>
+#include <QtGui/QPainterPath>
+
 namespace Ui {
 namespace {
 
@@ -296,7 +299,152 @@ void PaintSolidBubble(QPainter &p, const SimpleBubble &args) {
 	});
 }
 
+[[nodiscard]] BubbleStyleOverride &OverrideStorage() {
+	static auto result = BubbleStyleOverride();
+	return result;
+}
+
+[[nodiscard]] QColor MixColors(const QColor &a, const QColor &b, float64 k) {
+	const auto r = std::clamp(k, 0., 1.);
+	return QColor::fromRgbF(
+		float(a.redF() * (1. - r) + b.redF() * r),
+		float(a.greenF() * (1. - r) + b.greenF() * r),
+		float(a.blueF() * (1. - r) + b.blueF() * r),
+		float(a.alphaF() * (1. - r) + b.alphaF() * r));
+}
+
+[[nodiscard]] QPainterPath OverrideBubblePath(
+		const SimpleBubble &args,
+		int tailWidth,
+		int tailHeight) {
+	const auto rect = QRectF(args.geometry);
+	const auto radius = [&](Corner corner) -> float64 {
+		return (corner == Corner::Large)
+			? BubbleRadiusLarge()
+			: (corner == Corner::Small)
+			? BubbleRadiusSmall()
+			: 0.;
+	};
+	const auto tl = radius(args.rounding.topLeft);
+	const auto tr = radius(args.rounding.topRight);
+	const auto bl = radius(args.rounding.bottomLeft);
+	const auto br = radius(args.rounding.bottomRight);
+	const auto leftTail = (args.rounding.bottomLeft == Corner::Tail);
+	const auto rightTail = (args.rounding.bottomRight == Corner::Tail);
+
+	auto path = QPainterPath();
+	path.moveTo(rect.left() + tl, rect.top());
+	path.lineTo(rect.right() + 1 - tr, rect.top());
+	if (tr > 0.) {
+		path.arcTo(rect.right() + 1 - 2 * tr, rect.top(), 2 * tr, 2 * tr, 90, -90);
+	}
+	if (rightTail) {
+		const auto bottom = rect.bottom() + 1.;
+		const auto x = rect.right() + 1.;
+		path.lineTo(x, bottom - tailHeight);
+		path.quadTo(x + 1., bottom - 2., x + tailWidth, bottom);
+		path.lineTo(x, bottom);
+	} else {
+		path.lineTo(rect.right() + 1, rect.bottom() + 1 - br);
+		if (br > 0.) {
+			path.arcTo(rect.right() + 1 - 2 * br, rect.bottom() + 1 - 2 * br, 2 * br, 2 * br, 0, -90);
+		}
+	}
+	if (leftTail) {
+		const auto bottom = rect.bottom() + 1.;
+		const auto x = rect.left();
+		path.lineTo(x - tailWidth, bottom);
+		path.quadTo(x - 1., bottom - 2., x, bottom - tailHeight);
+	} else {
+		path.lineTo(rect.left() + bl, rect.bottom() + 1);
+		if (bl > 0.) {
+			path.arcTo(rect.left(), rect.bottom() + 1 - 2 * bl, 2 * bl, 2 * bl, 270, -90);
+		}
+	}
+	path.lineTo(rect.left(), rect.top() + tl);
+	if (tl > 0.) {
+		path.arcTo(rect.left(), rect.top(), 2 * tl, 2 * tl, 180, -90);
+	}
+	path.closeSubpath();
+	return path;
+}
+
+void PaintOverrideBubble(
+		QPainter &p,
+		const SimpleBubble &args,
+		const BubbleStyleOverride &o) {
+	const auto &st = args.st->messageStyle(args.outbg, args.selected);
+	const auto theme = st.msgBg->c;
+	auto tint = args.outbg ? o.outTint : o.inTint;
+	auto strength = o.tintStrength * (args.outbg ? 1. : 0.55);
+	if (std::abs(tint.lightnessF() - theme.lightnessF()) > 0.45) {
+		strength *= 0.5;
+	}
+	auto base = tint.isValid() ? MixColors(theme, tint, strength) : theme;
+	base.setAlphaF(float(std::clamp(o.opacity * theme.alphaF(), 0.15, 1.)));
+
+	const auto &tail = args.outbg ? st.tailRight : st.tailLeft;
+	const auto tailWidth = std::max(tail.width(), 6);
+	const auto tailHeight = std::max(tail.height(), 8);
+	const auto path = OverrideBubblePath(args, tailWidth, tailHeight);
+	const auto topRounded = (args.rounding.topLeft != Corner::None)
+		|| (args.rounding.topRight != Corner::None);
+
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	if (args.shadowed) {
+		if (o.volumetric) {
+			const auto depth = float64(style::ConvertScale(3));
+			const auto extruded = path.translated(depth * 0.4, depth);
+			p.setBrush(QColor(0, 0, 0, 40));
+			p.drawPath(path.translated(1., depth + 2.).subtracted(path));
+			auto side = base.darker(165);
+			side.setAlphaF(float(std::min(1., base.alphaF() + 0.15)));
+			p.setBrush(side);
+			p.drawPath(extruded.subtracted(path));
+		} else {
+			p.setBrush(st.msgShadow);
+			p.drawPath(path.translated(0., st::msgShadow).subtracted(path));
+		}
+	}
+	if (o.volumetric) {
+		const auto bounds = path.boundingRect();
+		auto face = QLinearGradient(bounds.topLeft(), bounds.bottomLeft());
+		auto top = base.lighter(116);
+		top.setAlphaF(base.alphaF());
+		face.setColorAt(0., top);
+		face.setColorAt(1., base);
+		p.setBrush(face);
+	} else {
+		p.setBrush(base);
+	}
+	p.drawPath(path);
+	if (o.volumetric && topRounded) {
+		const auto bounds = path.boundingRect();
+		p.setClipPath(path);
+		auto gloss = QLinearGradient(
+			bounds.topLeft(),
+			QPointF(bounds.left(), bounds.top() + std::min(bounds.height(), 28.)));
+		gloss.setColorAt(0., QColor(255, 255, 255, 46));
+		gloss.setColorAt(1., QColor(255, 255, 255, 0));
+		p.fillRect(bounds, gloss);
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(QColor(255, 255, 255, 30), 1.));
+		p.drawPath(path);
+	}
+	p.restore();
+}
+
 } // namespace
+
+void SetBubbleStyleOverride(BubbleStyleOverride value) {
+	OverrideStorage() = value;
+}
+
+const BubbleStyleOverride &CurrentBubbleStyleOverride() {
+	return OverrideStorage();
+}
 
 std::unique_ptr<BubblePattern> PrepareBubblePattern(
 		not_null<const style::palette*> st) {
@@ -346,7 +494,9 @@ void FinishBubblePatternOnMain(not_null<BubblePattern*> pattern) {
 }
 
 void PaintBubble(QPainter &p, const SimpleBubble &args) {
-	if (UsePatternBubble(args)) {
+	if (const auto &o = CurrentBubbleStyleOverride(); o.enabled) {
+		PaintOverrideBubble(p, args, o);
+	} else if (UsePatternBubble(args)) {
 		PaintPatternBubble(p, args);
 	} else {
 		PaintSolidBubble(p, args);
@@ -395,7 +545,7 @@ void PaintBubble(QPainter &p, const ComplexBubble &args) {
 }
 
 void PaintBubble(QPainter &p, const BubbleWithGaps &args) {
-	if (args.gaps.empty()) {
+	if (args.gaps.empty() || CurrentBubbleStyleOverride().enabled) {
 		PaintBubble(p, args.simple);
 		return;
 	}

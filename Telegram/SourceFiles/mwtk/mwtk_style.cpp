@@ -1,0 +1,139 @@
+/*
+This file is part of MWTKgram, a Telegram Desktop based client.
+
+For license and copyright information please follow this link:
+https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
+*/
+#include "mwtk/mwtk_style.h"
+
+#include "mwtk/mwtk_options.h"
+#include "ui/chat/message_bubble.h"
+#include "ui/style/style_core_scale.h"
+#include "ui/ui_utility.h"
+#include "styles/style_dialogs.h"
+
+#include <QtGui/QLinearGradient>
+#include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
+#include <QtWidgets/QApplication>
+#include <QtWidgets/QWidget>
+
+namespace Mwtk {
+namespace {
+
+[[nodiscard]] QColor Mix(const QColor &a, const QColor &b, double k) {
+	const auto r = std::clamp(k, 0., 1.);
+	return QColor::fromRgbF(
+		float(a.redF() * (1. - r) + b.redF() * r),
+		float(a.greenF() * (1. - r) + b.greenF() * r),
+		float(a.blueF() * (1. - r) + b.blueF() * r),
+		float(a.alphaF() * (1. - r) + b.alphaF() * r));
+}
+
+void ApplyChatStyle() {
+	const auto effects = EffectsEnabled();
+	const auto volumetric = effects && OptionValue(kOptionBubbles3d);
+	const auto tinted = effects && OptionValue(kOptionBubblesTint);
+	const auto opacityIndex = std::clamp(
+		OptionInt(kOptionBubblesOpacity),
+		0,
+		kBubbleOpacityCount - 1);
+	const auto opacity = (opacityIndex == 0)
+		? 1.
+		: (opacityIndex == 2)
+		? 0.55
+		: 0.78;
+	auto value = Ui::BubbleStyleOverride();
+	value.enabled = volumetric || tinted || (effects && opacityIndex != 0);
+	value.volumetric = volumetric;
+	if (tinted) {
+		const auto palette = PaletteAt(OptionInt(kOptionPalette), 0.);
+		value.outTint = palette.first;
+		value.inTint = palette.third;
+		value.tintStrength = 0.42;
+	}
+	value.opacity = effects ? opacity : 1.;
+	Ui::SetBubbleStyleOverride(value);
+	for (const auto widget : QApplication::topLevelWidgets()) {
+		if (widget->isVisible()) {
+			Ui::ForceFullRepaint(widget);
+		}
+	}
+}
+
+} // namespace
+
+void SetupChatStyle() {
+	static auto done = false;
+	if (done) {
+		return;
+	}
+	done = true;
+	static auto lifetime = rpl::lifetime();
+	ChatStyleChanges(
+	) | rpl::on_next([] {
+		ApplyChatStyle();
+	}, lifetime);
+	ApplyChatStyle();
+}
+
+bool PaintDialogCard(
+		QPainter &p,
+		QRect geometry,
+		const QColor &background,
+		bool active,
+		bool selected) {
+	const auto style = CurrentCardStyle();
+	if (!style.enabled) {
+		return false;
+	}
+	p.fillRect(geometry, background);
+	const auto scale = style::Scale() / 100.;
+	const auto inset = QRectF(geometry).marginsRemoved({
+		6. * scale,
+		2. * scale,
+		6. * scale,
+		4. * scale,
+	});
+	if (inset.width() <= 0 || inset.height() <= 0) {
+		return true;
+	}
+	const auto radius = std::min(10. * scale, inset.height() / 3.);
+	auto base = active
+		? Mix(st::dialogsBgActive->c, style.accent, 0.4)
+		: selected
+		? Mix(st::dialogsBgOver->c, style.accent, 0.16)
+		: Mix(background, style.accent, 0.07).lighter(108);
+	auto path = QPainterPath();
+	path.addRoundedRect(inset, radius, radius);
+
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	const auto depth = std::max(1., 2.5 * scale);
+	p.setBrush(QColor(0, 0, 0, 36));
+	p.drawPath(path.translated(0., depth + 1.5));
+	p.setBrush(base.darker(150));
+	p.drawPath(path.translated(0., depth));
+	auto face = QLinearGradient(inset.topLeft(), inset.bottomLeft());
+	face.setColorAt(0., base.lighter(112));
+	face.setColorAt(1., base);
+	p.setBrush(face);
+	p.drawPath(path);
+	p.setClipPath(path);
+	auto gloss = QLinearGradient(
+		inset.topLeft(),
+		QPointF(inset.left(), inset.top() + inset.height() * 0.45));
+	gloss.setColorAt(0., QColor(255, 255, 255, active ? 40 : 26));
+	gloss.setColorAt(1., QColor(255, 255, 255, 0));
+	p.fillRect(inset, gloss);
+	p.setBrush(Qt::NoBrush);
+	p.setPen(QPen(
+		active ? QColor(255, 255, 255, 70) : QColor(255, 255, 255, 22),
+		1.));
+	p.drawPath(path);
+	p.restore();
+	return true;
+}
+
+} // namespace Mwtk
