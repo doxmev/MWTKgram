@@ -14,7 +14,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QImage>
 #include <QtGui/QPainterPath>
 #include <QtGui/QRegion>
-#include <QtGui/QTransform>
 
 #include <array>
 #include <random>
@@ -59,48 +58,61 @@ public:
 	[[nodiscard]] QSize size() const;
 
 private:
+	enum class Kind {
+		Label,
+		Object,
+		Particle,
+	};
 	struct Shape {
 		std::vector<std::array<double, 3>> vertices;
 		std::vector<std::pair<int, int>> edges;
 	};
-	struct Object {
+	struct Body {
+		Kind kind = Kind::Particle;
+		double x = 0.;
+		double y = 0.;
+		double z = 1.;
+		double vx = 0.;
+		double vy = 0.;
+		double vz = 0.;
+		double size = 1.;
+		double phase = 0.;
 		int shape = 0;
-		QPointF position;
-		QPointF velocity;
-		double radius = 0.;
+		int color = 0;
 		double angles[3] = { 0., 0., 0. };
 		double speeds[3] = { 0., 0., 0. };
 	};
-	struct Label {
-		QPointF position;
-		QPointF velocity;
-		double phase = 0.;
-		double scale = 1.;
-	};
-	struct Particle {
-		QPointF position;
-		double speed = 0.;
-		double phase = 0.;
-		double size = 0.;
-		int color = 0;
+	struct Projected {
+		QPointF center;
+		double scale = 0.;
+		double alpha = 0.;
 	};
 
 	void rebuildText();
-	void rebuildObjects();
-	void rebuildParticles();
-	void rebuildLabels();
+	void rebuildBodies();
+	void spawn(Body &body, bool initial);
+	[[nodiscard]] static double farPlane(Kind kind);
+	[[nodiscard]] bool enabled(Kind kind) const;
+	[[nodiscard]] double focal() const;
+	[[nodiscard]] Projected project(const Body &body) const;
+	[[nodiscard]] QRect bodyRect(const Body &body) const;
 	void collectRects(std::vector<QRect> &rects) const;
-	[[nodiscard]] QTransform labelTransform(const Label &label) const;
-	[[nodiscard]] QRect labelRect(const Label &label) const;
+
 	void paintLabel(
 		QPainter &p,
-		const Label &label,
+		const Body &body,
+		const Projected &projected,
 		const Palette &palette) const;
 	void paintObject(
 		QPainter &p,
-		const Object &object,
+		const Body &body,
+		const Projected &projected,
 		const Palette &palette) const;
-	void paintParticles(QPainter &p, const Palette &palette) const;
+	void paintParticle(
+		QPainter &p,
+		const Body &body,
+		const Projected &projected,
+		const Palette &palette) const;
 
 	SceneConfig _config;
 	QSize _size;
@@ -111,13 +123,9 @@ private:
 	QRectF _textBounds;
 	QImage _textGlow;
 	QPointF _textGlowOffset;
-	int _textGlowPalette = -1;
 
 	std::vector<Shape> _shapes;
-	std::vector<Label> _labels;
-	std::vector<Object> _objects;
-	std::vector<Particle> _particles;
-
+	std::vector<Body> _bodies;
 	std::vector<QRect> _lastRects;
 
 };

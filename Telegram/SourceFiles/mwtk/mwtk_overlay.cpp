@@ -16,7 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Mwtk {
 namespace {
 
-constexpr auto kFrameDelay = crl::time(33);
+constexpr auto kFrameDelay = crl::time(16);
 
 [[nodiscard]] double CurrentScale() {
 	return style::Scale() / 100.;

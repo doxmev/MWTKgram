@@ -150,7 +150,7 @@ Scene::Scene() : _random(20261011) {
 	}
 	for (auto &v : cube.vertices) {
 		for (auto &c : v) {
-			c *= 0.62;
+			c *= 0.6;
 		}
 	}
 
@@ -219,10 +219,10 @@ Scene::Scene() : _random(20261011) {
 		}
 	}
 
-	_shapes.push_back(std::move(ico));
-	_shapes.push_back(std::move(torus));
 	_shapes.push_back(std::move(cube));
+	_shapes.push_back(std::move(ico));
 	_shapes.push_back(std::move(octa));
+	_shapes.push_back(std::move(torus));
 }
 
 void Scene::setConfig(const SceneConfig &config) {
@@ -235,9 +235,7 @@ void Scene::setConfig(const SceneConfig &config) {
 		rebuildText();
 	}
 	if (scaleChanged) {
-		rebuildLabels();
-		rebuildObjects();
-		rebuildParticles();
+		rebuildBodies();
 	}
 }
 
@@ -247,9 +245,7 @@ void Scene::resize(QSize size) {
 	}
 	_size = size;
 	rebuildText();
-	rebuildLabels();
-	rebuildObjects();
-	rebuildParticles();
+	rebuildBodies();
 }
 
 QSize Scene::size() const {
@@ -261,17 +257,26 @@ bool Scene::empty() const {
 		|| (!_config.text && !_config.objects && !_config.particles);
 }
 
+bool Scene::enabled(Kind kind) const {
+	switch (kind) {
+	case Kind::Label: return _config.text;
+	case Kind::Object: return _config.objects;
+	case Kind::Particle: return _config.particles;
+	}
+	return false;
+}
+
+double Scene::focal() const {
+	return std::max(_size.width(), _size.height()) * 0.5;
+}
+
 void Scene::rebuildText() {
 	_textPath = QPainterPath();
 	_textGlow = QImage();
 	if (_size.isEmpty() || _config.label.isEmpty()) {
 		return;
 	}
-	const auto shortest = std::min(_size.width(), _size.height());
-	const auto pixel = int(Clamp(
-		shortest * 0.032,
-		14. * _config.scale,
-		24. * _config.scale));
+	const auto pixel = int(std::round(24. * _config.scale));
 	auto font = QFont(QStringLiteral("Segoe UI"));
 	font.setPixelSize(pixel);
 	font.setWeight(QFont::Black);
@@ -284,7 +289,7 @@ void Scene::rebuildText() {
 	_textBounds = _textPath.boundingRect();
 
 	const auto palette = PaletteAt(_config.palette, 0.);
-	const auto margin = int(std::ceil(pixel * 0.7));
+	const auto margin = int(std::ceil(pixel * 0.75));
 	const auto glowRect = _textBounds.toAlignedRect().marginsAdded(
 		{ margin, margin, margin, margin });
 	auto glow = QImage(glowRect.size(), QImage::Format_ARGB32_Premultiplied);
@@ -296,194 +301,165 @@ void Scene::rebuildText() {
 		const auto color = (_config.palette == kRainbowIndex)
 			? QColor(255, 255, 255)
 			: palette.glow;
-		p.setPen(QPen(WithAlpha(color, 0.9), pixel * 0.16));
+		p.setPen(QPen(WithAlpha(color, 0.9), pixel * 0.18));
 		p.setBrush(color);
 		p.drawPath(_textPath);
 	}
-	_textGlow = BlurImage(glow, std::max(2, pixel / 6));
+	_textGlow = BlurImage(glow, std::max(2, pixel / 5));
 	_textGlowOffset = glowRect.topLeft();
-	_textGlowPalette = _config.palette;
 }
 
-void Scene::rebuildObjects() {
-	_objects.clear();
-	if (_size.isEmpty()) {
-		return;
+double Scene::farPlane(Kind kind) {
+	switch (kind) {
+	case Kind::Label: return 2.4;
+	case Kind::Object: return 3.2;
+	case Kind::Particle: return 4.2;
 	}
-	const auto area = double(_size.width()) * _size.height();
-	const auto count = int(Clamp(area / 220000., 2., 5.));
+	return 4.2;
+}
+
+void Scene::spawn(Body &body, bool initial) {
+	constexpr auto kNear = 0.55;
+	const auto kFar = farPlane(body.kind);
 	auto unit = std::uniform_real_distribution<double>(0., 1.);
-	for (auto i = 0; i != count; ++i) {
-		auto object = Object();
-		object.shape = i % int(_shapes.size());
-		object.radius = (22. + 18. * unit(_random)) * _config.scale;
-		object.position = QPointF(
-			object.radius + unit(_random) * std::max(1., _size.width() - 2 * object.radius),
-			object.radius + unit(_random) * std::max(1., _size.height() - 2 * object.radius));
-		const auto angle = unit(_random) * 2. * kPi;
-		const auto speed = (12. + 14. * unit(_random)) * _config.scale;
-		object.velocity = QPointF(
-			std::cos(angle) * speed,
-			std::sin(angle) * speed);
+	body.z = initial ? (kNear + 0.4 + unit(_random) * (kFar - kNear - 0.4)) : kFar;
+	const auto w = std::max(1, _size.width());
+	const auto h = std::max(1, _size.height());
+	const auto f = std::max(1., focal());
+	const auto spreadX = (w / 2.) * body.z / f * 1.1;
+	const auto spreadY = (h / 2.) * body.z / f * 1.1;
+	body.x = (unit(_random) * 2. - 1.) * spreadX;
+	body.y = (unit(_random) * 2. - 1.) * spreadY;
+	body.phase = unit(_random) * 2. * kPi;
+	body.color = int(unit(_random) * 3.) % 3;
+	switch (body.kind) {
+	case Kind::Label:
+		body.vz = -(0.035 + 0.025 * unit(_random));
+		body.size = 0.9 + 0.3 * unit(_random);
+		break;
+	case Kind::Object:
+		body.vz = -(0.045 + 0.04 * unit(_random));
+		body.size = 0.8 + 0.6 * unit(_random);
 		for (auto k = 0; k != 3; ++k) {
-			object.angles[k] = unit(_random) * 2. * kPi;
-			object.speeds[k] = (0.15 + 0.5 * unit(_random))
+			body.angles[k] = unit(_random) * 2. * kPi;
+			body.speeds[k] = (0.06 + 0.22 * unit(_random))
 				* ((unit(_random) < 0.5) ? -1. : 1.);
 		}
-		_objects.push_back(object);
+		break;
+	case Kind::Particle:
+		body.vz = -(0.06 + 0.08 * unit(_random));
+		body.size = 0.6 + 0.9 * unit(_random);
+		break;
 	}
+	body.vx = (unit(_random) * 2. - 1.) * 0.012;
+	body.vy = (unit(_random) * 2. - 1.) * 0.012;
 }
 
-void Scene::rebuildParticles() {
-	_particles.clear();
+void Scene::rebuildBodies() {
+	_bodies.clear();
 	if (_size.isEmpty()) {
 		return;
 	}
 	const auto area = double(_size.width()) * _size.height();
-	const auto count = int(Clamp(area / 16000., 18., 70.));
-	auto unit = std::uniform_real_distribution<double>(0., 1.);
-	for (auto i = 0; i != count; ++i) {
-		auto particle = Particle();
-		particle.position = QPointF(
-			unit(_random) * _size.width(),
-			unit(_random) * _size.height());
-		particle.speed = (8. + 20. * unit(_random)) * _config.scale;
-		particle.phase = unit(_random) * 2. * kPi;
-		particle.size = (0.8 + 1.4 * unit(_random)) * _config.scale;
-		particle.color = i % 3;
-		_particles.push_back(particle);
+	const auto labels = int(Clamp(area / 120000., 5., 10.));
+	const auto objects = int(Clamp(area / 75000., 7., 16.));
+	const auto particles = int(Clamp(area / 12000., 30., 80.));
+	const int shapes[] = { 0, 1, 0, 2, 0, 3, 0, 1 };
+	auto add = [&](Kind kind, int count) {
+		for (auto i = 0; i != count; ++i) {
+			auto body = Body();
+			body.kind = kind;
+			body.shape = shapes[i % int(std::size(shapes))];
+			spawn(body, true);
+			_bodies.push_back(body);
+		}
+	};
+	add(Kind::Particle, particles);
+	add(Kind::Object, objects);
+	add(Kind::Label, labels);
+}
+
+Scene::Projected Scene::project(const Body &body) const {
+	const auto f = focal();
+	const auto camX = 0.06 * std::sin(_time * 0.21);
+	const auto camY = 0.045 * std::sin(_time * 0.17 + 1.1);
+	const auto z = std::max(body.z, 0.05);
+	auto result = Projected();
+	result.center = QPointF(
+		_size.width() / 2. + (body.x - camX) * f / z,
+		_size.height() / 2. + (body.y - camY) * f / z);
+	result.scale = 1. / z;
+	const auto smooth = [](double edge0, double edge1, double x) {
+		const auto t = Clamp((x - edge0) / (edge1 - edge0), 0., 1.);
+		return t * t * (3. - 2. * t);
+	};
+	const auto far = farPlane(body.kind);
+	const auto fadeIn = 1. - smooth(far - 0.8, far, body.z);
+	const auto fadeOut = smooth(0.55, 1.05, body.z);
+	const auto depth = 0.55 + 0.45 * (1. - smooth(1., 4.2, body.z));
+	result.alpha = fadeIn * fadeOut * depth;
+	return result;
+}
+
+QRect Scene::bodyRect(const Body &body) const {
+	const auto projected = project(body);
+	if (projected.alpha <= 0.) {
+		return QRect();
 	}
+	const auto c = projected.center;
+	switch (body.kind) {
+	case Kind::Label: {
+		if (_textGlow.isNull()) {
+			return QRect();
+		}
+		const auto k = projected.scale * body.size;
+		const auto r = std::max(_textGlow.width(), _textGlow.height())
+			* k * 0.56 + 3.;
+		return QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r).toAlignedRect();
+	}
+	case Kind::Object: {
+		const auto r = 30. * _config.scale * body.size * projected.scale
+			* 1.5 + 4.;
+		return QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r).toAlignedRect();
+	}
+	case Kind::Particle: {
+		const auto r = 2.2 * _config.scale * body.size * projected.scale
+			* 2.4 + 2.;
+		return QRectF(c.x() - r, c.y() - r, 2 * r, 2 * r).toAlignedRect();
+	}
+	}
+	return QRect();
 }
 
 void Scene::advance(double seconds) {
 	const auto dt = Clamp(seconds, 0., 0.1);
 	_time += dt;
-	const auto width = double(_size.width());
-	const auto height = double(_size.height());
-	for (auto &object : _objects) {
-		object.position += object.velocity * dt;
-		const auto r = object.radius * 1.1;
-		if (object.position.x() < r) {
-			object.position.setX(r);
-			object.velocity.setX(std::abs(object.velocity.x()));
-		} else if (object.position.x() > width - r) {
-			object.position.setX(std::max(r, width - r));
-			object.velocity.setX(-std::abs(object.velocity.x()));
-		}
-		if (object.position.y() < r) {
-			object.position.setY(r);
-			object.velocity.setY(std::abs(object.velocity.y()));
-		} else if (object.position.y() > height - r) {
-			object.position.setY(std::max(r, height - r));
-			object.velocity.setY(-std::abs(object.velocity.y()));
-		}
+	const auto f = std::max(1., focal());
+	for (auto &body : _bodies) {
+		body.x += body.vx * dt;
+		body.y += body.vy * dt;
+		body.z += body.vz * dt;
 		for (auto k = 0; k != 3; ++k) {
-			object.angles[k] += object.speeds[k] * dt;
+			body.angles[k] += body.speeds[k] * dt;
+		}
+		const auto limitX = (_size.width() / 2.) * body.z / f * 1.35 + 0.2;
+		const auto limitY = (_size.height() / 2.) * body.z / f * 1.35 + 0.2;
+		if (body.z < 0.55
+			|| std::abs(body.x) > limitX
+			|| std::abs(body.y) > limitY) {
+			spawn(body, false);
 		}
 	}
-	const auto wrap = std::max(_textBounds.width(), _textBounds.height())
-		* 1.2;
-	for (auto &label : _labels) {
-		label.position += label.velocity * dt;
-		auto &x = label.position.rx();
-		auto &y = label.position.ry();
-		if (x < -wrap) {
-			x += width + 2 * wrap;
-		} else if (x > width + wrap) {
-			x -= width + 2 * wrap;
-		}
-		if (y < -wrap) {
-			y += height + 2 * wrap;
-		} else if (y > height + wrap) {
-			y -= height + 2 * wrap;
-		}
-	}
-	auto unit = std::uniform_real_distribution<double>(0., 1.);
-	for (auto &particle : _particles) {
-		particle.position.ry() -= particle.speed * dt;
-		particle.position.rx() += std::sin(_time * 0.9 + particle.phase)
-			* 9. * _config.scale * dt;
-		if (particle.position.y() < -10.) {
-			particle.position = QPointF(
-				unit(_random) * width,
-				height + 10.);
-		}
-	}
-	if (_config.palette == kRainbowIndex && _textGlowPalette != kRainbowIndex) {
-		rebuildText();
-	}
-}
-
-void Scene::rebuildLabels() {
-	_labels.clear();
-	if (_size.isEmpty()) {
-		return;
-	}
-	const auto area = double(_size.width()) * _size.height();
-	const auto count = int(Clamp(area / 110000., 4., 10.));
-	auto unit = std::uniform_real_distribution<double>(0., 1.);
-	for (auto i = 0; i != count; ++i) {
-		auto label = Label();
-		label.position = QPointF(
-			unit(_random) * _size.width(),
-			unit(_random) * _size.height());
-		const auto angle = unit(_random) * 2. * kPi;
-		const auto speed = (14. + 22. * unit(_random)) * _config.scale;
-		label.velocity = QPointF(
-			std::cos(angle) * speed,
-			std::sin(angle) * speed * 0.6);
-		label.phase = unit(_random) * 2. * kPi;
-		label.scale = 0.8 + 0.45 * unit(_random);
-		_labels.push_back(label);
-	}
-}
-
-QTransform Scene::labelTransform(const Label &label) const {
-	auto transform = QTransform();
-	transform.translate(label.position.x(), label.position.y());
-	transform.rotate(6. * std::sin(_time * 0.6 + label.phase));
-	const auto scale = label.scale
-		* (1. + 0.06 * std::sin(_time * 1.7 + label.phase));
-	transform.scale(scale, scale);
-	return transform;
-}
-
-QRect Scene::labelRect(const Label &label) const {
-	if (_textGlow.isNull()) {
-		return QRect();
-	}
-	return labelTransform(label).mapRect(
-		QRectF(_textGlowOffset, QSizeF(_textGlow.size()))
-	).toAlignedRect().marginsAdded({ 2, 2, 2, 2 });
 }
 
 void Scene::collectRects(std::vector<QRect> &rects) const {
-	if (_config.text) {
-		for (const auto &label : _labels) {
-			const auto rect = labelRect(label);
-			if (!rect.isEmpty()) {
-				rects.push_back(rect);
-			}
+	for (const auto &body : _bodies) {
+		if (!enabled(body.kind)) {
+			continue;
 		}
-	}
-	if (_config.objects) {
-		for (const auto &object : _objects) {
-			const auto r = object.radius * 1.45 + 4.;
-			rects.push_back(QRectF(
-				object.position.x() - r,
-				object.position.y() - r,
-				2 * r,
-				2 * r).toAlignedRect());
-		}
-	}
-	if (_config.particles) {
-		for (const auto &particle : _particles) {
-			const auto r = particle.size * 2.4 + 2.;
-			rects.push_back(QRectF(
-				particle.position.x() - r,
-				particle.position.y() - r,
-				2 * r,
-				2 * r).toAlignedRect());
+		const auto rect = bodyRect(body);
+		if (!rect.isEmpty()) {
+			rects.push_back(rect);
 		}
 	}
 }
@@ -491,12 +467,20 @@ void Scene::collectRects(std::vector<QRect> &rects) const {
 QRegion Scene::takeDirtyRegion() {
 	auto rects = std::vector<QRect>();
 	collectRects(rects);
+	constexpr auto kTile = 32;
+	const auto snap = [&](const QRect &rect) {
+		const auto left = (rect.left() / kTile) * kTile;
+		const auto top = (rect.top() / kTile) * kTile;
+		const auto right = ((rect.right() + kTile) / kTile) * kTile;
+		const auto bottom = ((rect.bottom() + kTile) / kTile) * kTile;
+		return QRect(left, top, right - left, bottom - top);
+	};
 	auto result = QRegion();
 	for (const auto &rect : _lastRects) {
-		result += rect;
+		result += snap(rect);
 	}
 	for (const auto &rect : rects) {
-		result += rect;
+		result += snap(rect);
 	}
 	_lastRects = std::move(rects);
 	return result;
@@ -507,23 +491,31 @@ void Scene::paint(QPainter &p) const {
 		return;
 	}
 	const auto palette = PaletteAt(_config.palette, _time);
+	auto order = std::vector<const Body*>();
+	order.reserve(_bodies.size());
+	for (const auto &body : _bodies) {
+		if (enabled(body.kind)) {
+			order.push_back(&body);
+		}
+	}
+	std::sort(order.begin(), order.end(), [](const Body *a, const Body *b) {
+		return a->z > b->z;
+	});
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing);
 	p.setRenderHint(QPainter::SmoothPixmapTransform);
-	if (_config.particles) {
-		p.setOpacity(_config.opacity);
-		paintParticles(p, palette);
-	}
-	if (_config.objects) {
-		p.setOpacity(_config.opacity);
-		for (const auto &object : _objects) {
-			paintObject(p, object, palette);
+	for (const auto body : order) {
+		const auto projected = project(*body);
+		if (projected.alpha <= 0.003) {
+			continue;
 		}
-	}
-	if (_config.text) {
-		for (const auto &label : _labels) {
-			p.setOpacity(_config.opacity);
-			paintLabel(p, label, palette);
+		p.setOpacity(_config.opacity * projected.alpha);
+		switch (body->kind) {
+		case Kind::Label: paintLabel(p, *body, projected, palette); break;
+		case Kind::Object: paintObject(p, *body, projected, palette); break;
+		case Kind::Particle:
+			paintParticle(p, *body, projected, palette);
+			break;
 		}
 	}
 	p.restore();
@@ -531,23 +523,27 @@ void Scene::paint(QPainter &p) const {
 
 void Scene::paintLabel(
 		QPainter &p,
-		const Label &label,
+		const Body &body,
+		const Projected &projected,
 		const Palette &palette) const {
 	if (_textPath.isEmpty()) {
 		return;
 	}
 	const auto opacity = p.opacity();
 	p.save();
-	p.setTransform(labelTransform(label), true);
+	p.translate(projected.center);
+	p.rotate(5. * std::sin(_time * 0.35 + body.phase));
+	const auto k = projected.scale * body.size;
+	p.scale(k, k);
 
-	const auto pulse = 0.55 + 0.45 * std::sin(_time * 2.1 + label.phase);
-	p.setOpacity(opacity * (0.45 + 0.4 * pulse));
+	const auto pulse = 0.5 + 0.5 * std::sin(_time * 1.3 + body.phase);
+	p.setOpacity(opacity * (0.5 + 0.35 * pulse));
 	p.drawImage(_textGlowOffset, _textGlow);
 	p.setOpacity(opacity);
 
 	const auto width = std::max(1., _textBounds.width());
 	const auto shift = std::fmod(
-		(_time + label.phase) * width * 0.45,
+		(_time * 0.6 + body.phase) * width * 0.45,
 		width * 2.);
 	auto gradient = QLinearGradient(
 		_textBounds.left() - shift,
@@ -561,43 +557,41 @@ void Scene::paintLabel(
 	gradient.setColorAt(1., palette.first);
 	p.fillPath(_textPath, gradient);
 
-	const auto period = 3.2;
-	const auto phase = std::fmod(_time + label.phase, period) / period;
+	const auto period = 4.5;
+	const auto phase = std::fmod(_time + body.phase * 2., period) / period;
 	const auto sweepX = _textBounds.left()
 		+ (phase * 1.8 - 0.4) * _textBounds.width();
 	auto shine = QLinearGradient(
-		sweepX - width * 0.18,
+		sweepX - width * 0.2,
 		_textBounds.top(),
-		sweepX + width * 0.18,
+		sweepX + width * 0.2,
 		_textBounds.bottom());
 	shine.setColorAt(0., QColor(255, 255, 255, 0));
-	shine.setColorAt(0.5, QColor(255, 255, 255, 170));
+	shine.setColorAt(0.5, QColor(255, 255, 255, 150));
 	shine.setColorAt(1., QColor(255, 255, 255, 0));
 	p.fillPath(_textPath, shine);
-
-	p.setBrush(Qt::NoBrush);
-	p.setPen(QPen(WithAlpha(palette.glow, 0.55), 0.8 * _config.scale));
-	p.drawPath(_textPath);
 	p.restore();
 }
 
 void Scene::paintObject(
 		QPainter &p,
-		const Object &object,
+		const Body &body,
+		const Projected &projected,
 		const Palette &palette) const {
-	const auto &shape = _shapes[object.shape];
-	struct Projected {
+	const auto &shape = _shapes[body.shape];
+	const auto radius = 30. * _config.scale * body.size * projected.scale;
+	struct Point {
 		QPointF point;
 		double depth = 0.;
 	};
-	auto projected = std::vector<Projected>();
-	projected.reserve(shape.vertices.size());
+	auto points = std::vector<Point>();
+	points.reserve(shape.vertices.size());
 	const auto distance = 3.4;
 	for (auto vertex : shape.vertices) {
-		Rotate(vertex, object.angles);
+		Rotate(vertex, body.angles);
 		const auto k = distance / (distance - vertex[2]);
-		projected.push_back({
-			object.position + QPointF(vertex[0], vertex[1]) * object.radius * k,
+		points.push_back({
+			projected.center + QPointF(vertex[0], vertex[1]) * radius * k,
 			(vertex[2] + 1.) / 2.,
 		});
 	}
@@ -612,63 +606,53 @@ void Scene::paintObject(
 		edges.push_back({
 			from,
 			till,
-			(projected[from].depth + projected[till].depth) / 2.,
+			(points[from].depth + points[till].depth) / 2.,
 		});
 	}
 	std::sort(edges.begin(), edges.end(), [](const Edge &a, const Edge &b) {
 		return a.depth < b.depth;
 	});
-	const auto hueShift = std::sin(_time * 0.8 + object.radius) * 0.5 + 0.5;
+	const auto line = std::max(0.6, 1.3 * _config.scale * projected.scale);
+	const auto tint = 0.5 + 0.5 * std::sin(_time * 0.4 + body.phase);
 	for (const auto pass : { 0, 1 }) {
 		for (const auto &edge : edges) {
 			const auto depth = Clamp(edge.depth, 0., 1.);
 			const auto base = Mix(palette.third, palette.first, depth);
-			const auto color = Mix(base, palette.second, hueShift * 0.5);
-			const auto width = (0.7 + 0.9 * depth) * _config.scale;
-			if (pass == 0) {
-				p.setPen(QPen(
-					WithAlpha(palette.glow, 0.10 + 0.18 * depth),
-					width * 2.6,
-					Qt::SolidLine,
-					Qt::RoundCap));
-			} else {
-				p.setPen(QPen(
-					WithAlpha(color, 0.35 + 0.65 * depth),
+			const auto color = Mix(base, palette.second, tint * 0.5);
+			const auto width = line * (0.6 + 0.6 * depth);
+			p.setPen(pass
+				? QPen(
+					WithAlpha(color, 0.3 + 0.7 * depth),
 					width,
 					Qt::SolidLine,
+					Qt::RoundCap)
+				: QPen(
+					WithAlpha(palette.glow, 0.08 + 0.14 * depth),
+					width * 3.,
+					Qt::SolidLine,
 					Qt::RoundCap));
-			}
-			p.drawLine(
-				projected[edge.from].point,
-				projected[edge.till].point);
+			p.drawLine(points[edge.from].point, points[edge.till].point);
 		}
-	}
-	p.setPen(Qt::NoPen);
-	for (const auto &vertex : projected) {
-		if (vertex.depth < 0.45) {
-			continue;
-		}
-		const auto r = (0.7 + 1.3 * vertex.depth) * _config.scale;
-		p.setBrush(WithAlpha(palette.second, vertex.depth));
-		p.drawEllipse(vertex.point, r, r);
 	}
 }
 
-void Scene::paintParticles(QPainter &p, const Palette &palette) const {
-	p.setPen(Qt::NoPen);
+void Scene::paintParticle(
+		QPainter &p,
+		const Body &body,
+		const Projected &projected,
+		const Palette &palette) const {
 	const QColor colors[] = { palette.first, palette.second, palette.third };
-	for (const auto &particle : _particles) {
-		const auto twinkle = 0.35
-			+ 0.65 * (0.5 + 0.5 * std::sin(_time * 2.3 + particle.phase));
-		const auto r = particle.size * 2.4;
-		auto gradient = QRadialGradient(particle.position, r);
-		const auto &color = colors[particle.color];
-		gradient.setColorAt(0., WithAlpha(QColor(255, 255, 255), twinkle));
-		gradient.setColorAt(0.25, WithAlpha(color, twinkle * 0.9));
-		gradient.setColorAt(1., WithAlpha(color, 0.));
-		p.setBrush(gradient);
-		p.drawEllipse(particle.position, r, r);
-	}
+	const auto twinkle = 0.45
+		+ 0.55 * (0.5 + 0.5 * std::sin(_time * 1.4 + body.phase));
+	const auto r = 2.2 * _config.scale * body.size * projected.scale * 2.4;
+	auto gradient = QRadialGradient(projected.center, r);
+	const auto &color = colors[body.color];
+	gradient.setColorAt(0., WithAlpha(QColor(255, 255, 255), twinkle));
+	gradient.setColorAt(0.25, WithAlpha(color, twinkle * 0.85));
+	gradient.setColorAt(1., WithAlpha(color, 0.));
+	p.setPen(Qt::NoPen);
+	p.setBrush(gradient);
+	p.drawEllipse(projected.center, r, r);
 }
 
 } // namespace Mwtk
