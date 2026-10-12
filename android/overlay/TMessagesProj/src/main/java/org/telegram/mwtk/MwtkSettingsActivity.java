@@ -70,6 +70,8 @@ public class MwtkSettingsActivity extends BaseFragment {
         build(getParentActivity());
     }
 
+    private static final String[] CHAT_FX_MODES = { "Выкл.", "Поверх обоев" };
+
     private void build(Context context) {
         header(context, "Главное");
         toggle(context, "Все эффекты MWTKgram", "Можно встряхнуть телефон, чтобы выключить", MwtkConfig.EFFECTS);
@@ -88,6 +90,7 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "Плывущие надписи", "doxmev и MWTK на фоне", MwtkConfig.LABELS);
         toggle(context, "3D-фигуры", "Вращающиеся каркасные кубы", MwtkConfig.FIGURES);
         flag(context, "Времена года", "Снег зимой, листья осенью, лепестки весной", MwtkConfig.SEASONS, true);
+        flagCycle(context, "Эффекты в чате", CHAT_FX_MODES, MwtkConfig.CHAT_FX, 1, null);
         flag(context, "Фон в такт музыке", "Нужен доступ к микрофону (как для голосовых)", MwtkConfig.MUSIC_PULSE, true);
         flag(context, "Секреты в 3 часа ночи", "Красная луна и глаза в лесу", MwtkConfig.NIGHT, true);
         toggle(context, "Фон следует за наклоном", "Гироскоп двигает надписи и фигуры", MwtkConfig.TILT);

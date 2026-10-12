@@ -174,6 +174,7 @@ public final class MwtkConfig {
     public static final String PHRASES = "phrases";
     public static final String CUSTOM_COLOR = "custom_color";
     public static final String RESPECT_ANIMATIONS = "respect_animations";
+    public static final String CHAT_FX = "chat_fx";
 
     public static boolean flag(String key, boolean def) {
         Object value = cache.get(key);

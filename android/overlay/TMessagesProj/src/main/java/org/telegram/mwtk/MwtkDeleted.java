@@ -26,6 +26,7 @@ public final class MwtkDeleted {
     private static final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
     private static final Paint bgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final RectF rect = new RectF();
+    private static final android.graphics.Path trash = new android.graphics.Path();
 
     private MwtkDeleted() {
     }
@@ -106,20 +107,29 @@ public final class MwtkDeleted {
         if (!isDeleted(message)) {
             return;
         }
-        textPaint.setTextSize(AndroidUtilities.dp(11));
-        textPaint.setFakeBoldText(true);
-        textPaint.setColor(0xffffffff);
-        String text = "удалено";
-        float w = textPaint.measureText(text);
-        float h = AndroidUtilities.dp(16);
-        float x = right - w - AndroidUtilities.dp(14);
-        float y = top - h + AndroidUtilities.dp(6);
-        rect.set(x - AndroidUtilities.dp(6), y, x + w + AndroidUtilities.dp(6), y + h);
-        bgPaint.setColor(0xe6d0101c);
-        bgPaint.setAlpha((int) (0xe6 * alpha));
-        textPaint.setAlpha((int) (255 * alpha));
-        canvas.drawRoundRect(rect, h / 2, h / 2, bgPaint);
-        canvas.drawText(text, x, y + h - AndroidUtilities.dp(4.5f), textPaint);
+        // Small red trash can in the top right corner, inside the bubble.
+        float s = AndroidUtilities.dp(1);
+        float x = right - (message.isOutOwner() ? 17 : 12) * s;
+        float y = top + 5 * s;
+        bgPaint.setStyle(Paint.Style.FILL);
+        bgPaint.setColor(0xffff2d46);
+        bgPaint.setAlpha((int) (255 * alpha));
+        rect.set(x - 4.5f * s, y + 1.5f * s, x + 4.5f * s, y + 2.7f * s);
+        canvas.drawRoundRect(rect, 0.6f * s, 0.6f * s, bgPaint);
+        rect.set(x - 1.6f * s, y, x + 1.6f * s, y + 1.8f * s);
+        canvas.drawRoundRect(rect, 0.6f * s, 0.6f * s, bgPaint);
+        trash.reset();
+        trash.moveTo(x - 3.6f * s, y + 3.4f * s);
+        trash.lineTo(x + 3.6f * s, y + 3.4f * s);
+        trash.lineTo(x + 2.9f * s, y + 11f * s);
+        trash.lineTo(x - 2.9f * s, y + 11f * s);
+        trash.close();
+        canvas.drawPath(trash, bgPaint);
+        bgPaint.setColor(0x66ffffff);
+        bgPaint.setAlpha((int) (0x66 * alpha));
+        bgPaint.setStrokeWidth(0.8f * s);
+        canvas.drawLine(x - 1.2f * s, y + 4.8f * s, x - 1f * s, y + 9.6f * s, bgPaint);
+        canvas.drawLine(x + 1.2f * s, y + 4.8f * s, x + 1f * s, y + 9.6f * s, bgPaint);
     }
 
     /** Journal: newest first, as (account, dialogId, messageId, time). */

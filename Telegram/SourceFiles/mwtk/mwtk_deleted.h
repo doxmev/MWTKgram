@@ -30,6 +30,6 @@ void ShowBox(
 // with a "deleted" mark, instead of disappearing.
 void KeepInChat(std::vector<not_null<HistoryItem*>> &items);
 [[nodiscard]] bool IsMarked(not_null<const HistoryItem*> item);
-void PaintMarker(QPainter &p, int width, int height, bool out);
+void PaintMarker(QPainter &p, QRect bubble, bool out);
 
 } // namespace Mwtk::Deleted

@@ -1712,10 +1712,13 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 					view->draw(p, context);
 				}
 				if (Mwtk::Deleted::IsMarked(item)) {
+					const auto message = dynamic_cast<
+						const HistoryView::Message*>(view);
 					Mwtk::Deleted::PaintMarker(
 						p,
-						width(),
-						height,
+						(message
+							? message->mwtkBubbleGeometry()
+							: QRect(0, 0, width(), height)),
 						view->hasOutLayout());
 				}
 				processPainted(view, top, height);

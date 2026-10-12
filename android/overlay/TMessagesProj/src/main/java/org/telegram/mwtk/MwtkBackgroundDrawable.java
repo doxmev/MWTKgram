@@ -85,7 +85,15 @@ public class MwtkBackgroundDrawable extends Drawable implements Runnable {
     private float time;
     private float pulse;
 
+    private final boolean overlayOnly;
+
     public MwtkBackgroundDrawable() {
+        this(false);
+    }
+
+    /** overlayOnly: no backdrop, only labels, figures and seasons over the chat wallpaper. */
+    public MwtkBackgroundDrawable(boolean overlayOnly) {
+        this.overlayOnly = overlayOnly;
         for (int i = 0; i < LABELS; i++) {
             Label label = new Label();
             label.text = (i % 3 == 1) ? "MWTK" : "doxmev";
@@ -159,13 +167,17 @@ public class MwtkBackgroundDrawable extends Drawable implements Runnable {
         MwtkConfig.load();
         final Rect bounds = getBounds();
         if (!MwtkConfig.effects) {
-            canvas.drawColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            if (!overlayOnly) {
+                canvas.drawColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            }
             return;
         }
         final int[] palette = MwtkConfig.palette();
         final int accent = MwtkConfig.accent();
         final int sceneIndex = MwtkConfig.num(MwtkConfig.SCENE, 0);
-        if (sceneIndex > 0) {
+        if (overlayOnly) {
+            // The chat wallpaper stays; only things floating over it are drawn.
+        } else if (sceneIndex > 0) {
             drawScene(canvas, bounds, sceneIndex, accent);
         } else {
             updateShader(bounds, palette, accent);
@@ -590,6 +602,17 @@ public class MwtkBackgroundDrawable extends Drawable implements Runnable {
 
     @Override
     public int getOpacity() {
-        return PixelFormat.OPAQUE;
+        return overlayOnly ? PixelFormat.TRANSLUCENT : PixelFormat.OPAQUE;
+    }
+
+    /** Stops listening to settings and frees the scene bitmap. */
+    public void dispose() {
+        MwtkConfig.removeListener(configListener);
+        unscheduleSelf(this);
+        scheduled = false;
+        if (scene != null) {
+            scene.recycle();
+            scene = null;
+        }
     }
 }

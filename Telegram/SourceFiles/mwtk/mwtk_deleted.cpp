@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_deleted.h"
 
 #include "base/unixtime.h"
+#include <QtGui/QPainterPath>
 #include "data/data_document.h"
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
@@ -190,29 +191,33 @@ bool IsMarked(not_null<const HistoryItem*> item) {
 	return !marked.empty() && marked.contains(item->fullId());
 }
 
-void PaintMarker(QPainter &p, int width, int height, bool out) {
-	const auto scale = style::Scale() / 100.;
+void PaintMarker(QPainter &p, QRect bubble, [[maybe_unused]] bool out) {
+	// Small red trash can in the top right corner, inside the bubble.
+	const auto s = style::Scale() / 100.;
+	const auto x = bubble.x() + bubble.width() - 10. * s;
+	const auto y = bubble.y() + 5. * s;
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing);
 	p.setPen(Qt::NoPen);
-	p.setBrush(QColor(255, 40, 60, 200));
+	p.setBrush(QColor(255, 45, 70));
 	p.drawRoundedRect(
-		QRectF(1. * scale, 2. * scale, 3. * scale, height - 4. * scale),
-		1.5 * scale,
-		1.5 * scale);
-	auto font = st::semiboldFont->f;
-	p.setFont(font);
-	const auto text = Utf("удалено");
-	const auto textWidth = st::semiboldFont->width(text);
-	const auto pill = QRectF(
-		out ? (8. * scale) : (width - textWidth - 22. * scale),
-		4. * scale,
-		textWidth + 14. * scale,
-		st::semiboldFont->height + 4. * scale);
-	p.setBrush(QColor(255, 40, 60, 220));
-	p.drawRoundedRect(pill, pill.height() / 2., pill.height() / 2.);
-	p.setPen(QColor(255, 255, 255));
-	p.drawText(pill, Qt::AlignCenter, text);
+		QRectF(x - 4.5 * s, y + 1.5 * s, 9. * s, 1.3 * s),
+		0.6 * s,
+		0.6 * s);
+	p.drawRoundedRect(
+		QRectF(x - 1.6 * s, y, 3.2 * s, 2. * s),
+		0.6 * s,
+		0.6 * s);
+	auto body = QPainterPath();
+	body.moveTo(x - 3.6 * s, y + 3.4 * s);
+	body.lineTo(x + 3.6 * s, y + 3.4 * s);
+	body.lineTo(x + 2.9 * s, y + 11. * s);
+	body.lineTo(x - 2.9 * s, y + 11. * s);
+	body.closeSubpath();
+	p.drawPath(body);
+	p.setPen(QPen(QColor(255, 255, 255, 110), 0.8 * s));
+	p.drawLine(QPointF(x - 1.2 * s, y + 4.8 * s), QPointF(x - 1. * s, y + 9.6 * s));
+	p.drawLine(QPointF(x + 1.2 * s, y + 4.8 * s), QPointF(x + 1. * s, y + 9.6 * s));
 	p.restore();
 }
 

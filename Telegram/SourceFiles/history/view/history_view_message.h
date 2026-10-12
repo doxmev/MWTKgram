@@ -301,6 +301,9 @@ public:
 
 	QRect effectIconGeometry() const override;
 	QRect innerGeometry() const override;
+	[[nodiscard]] QRect mwtkBubbleGeometry() const {
+		return countGeometry();
+	}
 	QPoint mediaTopLeft() const override;
 	[[nodiscard]] BottomRippleMask bottomRippleMask(int buttonHeight) const;
 

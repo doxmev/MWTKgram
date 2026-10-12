@@ -167,6 +167,11 @@ edit("TMessagesProj/src/main/java/org/telegram/ui/Cells/ChatMessageCell.java", r
 
 # Chat menu (hide, own name, note, deleted) and message options.
 CHAT = "TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java"
+# Effects inside the chat, over the wallpaper and under the messages.
+edit(CHAT, replace_once(
+    "        contentView.addView(chatListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n",
+    "        contentView.addView(chatListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n"
+    "        org.telegram.mwtk.MwtkChatFx.attach(contentView, chatListView);\n"))
 edit(CHAT, replace_once(
     "            if (!isTopic && !ChatObject.isMonoForum(currentChat)) {\n"
     "                clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,",
