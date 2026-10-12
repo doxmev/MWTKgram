@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_media_types.h"
 #include "data/data_peer.h"
 #include "data/data_peer_id.h"
+#include "data/data_session.h"
 #include "history/history.h"
 #include "history/history_item.h"
 #include "main/main_session.h"
@@ -22,6 +23,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
+#include "styles/style_widgets.h"
+#include "ui/style/style_core_scale.h"
+
+#include <QtGui/QPainter>
 
 #include <QtCore/QDateTime>
 #include <QtCore/QDir>
@@ -157,7 +162,59 @@ void Save() {
 		u"dd.MM.yyyy HH:mm"_q);
 }
 
+[[nodiscard]] base::flat_set<FullMsgId> &Marked() {
+	static auto result = base::flat_set<FullMsgId>();
+	return result;
+}
+
 } // namespace
+
+void KeepInChat(std::vector<not_null<HistoryItem*>> &items) {
+	if (!EffectsEnabled() || !OptionValue(kOptionKeepDeletedInChat)) {
+		return;
+	}
+	auto &marked = Marked();
+	items.erase(std::remove_if(items.begin(), items.end(), [&](
+			not_null<HistoryItem*> item) {
+		if (item->isService() || !item->isRegular()) {
+			return false;
+		}
+		marked.emplace(item->fullId());
+		item->history()->owner().requestItemRepaint(item);
+		return true;
+	}), items.end());
+}
+
+bool IsMarked(not_null<const HistoryItem*> item) {
+	const auto &marked = Marked();
+	return !marked.empty() && marked.contains(item->fullId());
+}
+
+void PaintMarker(QPainter &p, int width, int height, bool out) {
+	const auto scale = style::Scale() / 100.;
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	p.setBrush(QColor(255, 40, 60, 200));
+	p.drawRoundedRect(
+		QRectF(1. * scale, 2. * scale, 3. * scale, height - 4. * scale),
+		1.5 * scale,
+		1.5 * scale);
+	auto font = st::semiboldFont->f;
+	p.setFont(font);
+	const auto text = Utf("удалено");
+	const auto textWidth = st::semiboldFont->width(text);
+	const auto pill = QRectF(
+		out ? (8. * scale) : (width - textWidth - 22. * scale),
+		4. * scale,
+		textWidth + 14. * scale,
+		st::semiboldFont->height + 4. * scale);
+	p.setBrush(QColor(255, 40, 60, 220));
+	p.drawRoundedRect(pill, pill.height() / 2., pill.height() / 2.);
+	p.setPen(QColor(255, 255, 255));
+	p.drawText(pill, Qt::AlignCenter, text);
+	p.restore();
+}
 
 void Record(const std::vector<not_null<HistoryItem*>> &items, bool mine) {
 	if (items.empty()

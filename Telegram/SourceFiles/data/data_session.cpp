@@ -3372,6 +3372,9 @@ void Session::processMessagesDeleted(
 	}
 	if (!toDestroy.empty()) {
 		Mwtk::Deleted::Record(toDestroy, false);
+		Mwtk::Deleted::KeepInChat(toDestroy);
+	}
+	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
 		for (const auto &item : toDestroy) {
 			item->destroy();
@@ -3396,6 +3399,9 @@ void Session::processNonChannelMessagesDeleted(const QVector<MTPint> &data) {
 	}
 	if (!toDestroy.empty()) {
 		Mwtk::Deleted::Record(toDestroy, false);
+		Mwtk::Deleted::KeepInChat(toDestroy);
+	}
+	if (!toDestroy.empty()) {
 		notifyItemsAboutToBeDestroyed(toDestroy);
 		for (const auto &item : toDestroy) {
 			item->destroy();

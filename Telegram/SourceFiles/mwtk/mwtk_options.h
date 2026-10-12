@@ -54,6 +54,7 @@ extern const char kOptionAvatarOfflineColor[];
 extern const char kOptionCustomColor[];
 extern const char kOptionNightEvents[];
 extern const char kOptionSaveDeleted[];
+extern const char kOptionKeepDeletedInChat[];
 
 inline constexpr auto kCustomPaletteIndex = 7;
 

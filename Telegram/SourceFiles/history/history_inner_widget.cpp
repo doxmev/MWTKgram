@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_inner_widget.h"
 
 #include "mwtk/mwtk_appear.h"
+#include "mwtk/mwtk_deleted.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_polls.h"
@@ -1707,6 +1708,13 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 					}
 				} else {
 					view->draw(p, context);
+				}
+				if (Mwtk::Deleted::IsMarked(item)) {
+					Mwtk::Deleted::PaintMarker(
+						p,
+						width(),
+						height,
+						view->hasOutLayout());
 				}
 				processPainted(view, top, height);
 			}

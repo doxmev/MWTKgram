@@ -309,6 +309,13 @@ base::options::toggle OptionSaveDeleted({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionKeepDeletedInChat({
+	.id = kOptionKeepDeletedInChat,
+	.name = "MWTKgram keep deleted messages in chat",
+	.description = "Deleted messages stay in the chat with a mark.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -353,6 +360,7 @@ const char kOptionAvatarOfflineColor[] = "mwtk-avatar-offline-color";
 const char kOptionCustomColor[] = "mwtk-custom-color";
 const char kOptionNightEvents[] = "mwtk-night-events";
 const char kOptionSaveDeleted[] = "mwtk-save-deleted";
+const char kOptionKeepDeletedInChat[] = "mwtk-keep-deleted-in-chat";
 
 QString QualityName(int index) {
 	switch (index) {

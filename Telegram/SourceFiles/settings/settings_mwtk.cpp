@@ -847,6 +847,7 @@ void MwtkSettings::setupContent() {
 		::Mwtk::Hidden::Open(window);
 	});
 	AddOptionToggle(window, content, Utf("Сохранять удалённые сообщения"), ::Mwtk::kOptionSaveDeleted);
+	AddOptionToggle(window, content, Utf("Оставлять удалённые прямо в чате"), ::Mwtk::kOptionKeepDeletedInChat);
 	AddActionButton(content, Utf("Удалённые сообщения"), [=] {
 		::Mwtk::Deleted::ShowBox(window, nullptr);
 	});

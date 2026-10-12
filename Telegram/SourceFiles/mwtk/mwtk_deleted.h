@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 class HistoryItem;
 class PeerData;
+class QPainter;
 
 namespace Window {
 class SessionController;
@@ -24,5 +25,11 @@ void ShowBox(
 	PeerData *peer);
 
 [[nodiscard]] bool HasAny(not_null<PeerData*> peer);
+
+// Removes from the list the messages that should stay visible in the chat
+// with a "deleted" mark, instead of disappearing.
+void KeepInChat(std::vector<not_null<HistoryItem*>> &items);
+[[nodiscard]] bool IsMarked(not_null<const HistoryItem*> item);
+void PaintMarker(QPainter &p, int width, int height, bool out);
 
 } // namespace Mwtk::Deleted
