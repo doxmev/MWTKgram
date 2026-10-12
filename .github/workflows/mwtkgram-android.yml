@@ -1,0 +1,141 @@
+name: MWTKgram Android
+
+on:
+  push:
+    branches:
+      - dev
+      - android
+    paths:
+      - 'android/**'
+      - '.github/workflows/mwtkgram-android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mwtkgram-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Free disk space.
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift /usr/local/share/boost /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Clone MWTKgram.
+        uses: actions/checkout@v4
+        with:
+          path: mwtk
+
+      - name: Read Telegram version.
+        run: echo "TG_COMMIT=$(cat mwtk/android/TELEGRAM_COMMIT)" >> $GITHUB_ENV
+
+      - name: Clone Telegram for Android.
+        uses: actions/checkout@v4
+        with:
+          repository: DrKLO/Telegram
+          ref: ${{ env.TG_COMMIT }}
+          submodules: recursive
+          fetch-depth: 1
+          path: tg
+
+      - name: Java 17.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK packages.
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1" > /dev/null
+
+      - name: Gradle cache.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: android-gradle-${{ env.TG_COMMIT }}-${{ hashFiles('mwtk/android/apply.py') }}
+          restore-keys: android-gradle-
+
+      - name: Native build cache.
+        uses: actions/cache@v4
+        with:
+          path: |
+            tg/TMessagesProj/.cxx
+            tg/TMessagesProj_App/.cxx
+          key: android-cxx-${{ env.TG_COMMIT }}-${{ hashFiles('mwtk/android/overlay/TMessagesProj/jni/**') }}
+          restore-keys: android-cxx-${{ env.TG_COMMIT }}-
+
+      - name: Apply MWTKgram.
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          API_ID="$(printf '%s' "$TG_API_ID" | tr -d '[:space:]')"; API_ID="${API_ID#TG_API_ID=}"
+          API_HASH="$(printf '%s' "$TG_API_HASH" | tr -d '[:space:]')"; API_HASH="${API_HASH#TG_API_HASH=}"
+          echo "::add-mask::$API_ID"
+          echo "::add-mask::$API_HASH"
+          python3 mwtk/android/apply.py tg "$API_ID" "$API_HASH"
+          if [ -n "$ANDROID_KEYSTORE" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            printf '%s' "$ANDROID_KEYSTORE" | base64 -d > tg/TMessagesProj/config/release.keystore
+            sed -i "s/^RELEASE_KEY_PASSWORD=.*/RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD/; s/^RELEASE_STORE_PASSWORD=.*/RELEASE_STORE_PASSWORD=$ANDROID_KEY_PASSWORD/; s/^RELEASE_KEY_ALIAS=.*/RELEASE_KEY_ALIAS=mwtkgram/" tg/gradle.properties
+            echo "::notice title=Signing::Signed with the MWTKgram key"
+          else
+            echo "::warning title=Signing::ANDROID_KEYSTORE secret is missing, using the public test key"
+          fi
+          echo "APP_VERSION=$(grep '^APP_VERSION_NAME=' tg/gradle.properties | cut -d= -f2)-mwtk.${{ github.run_number }}" >> $GITHUB_ENV
+
+      - name: Build APK.
+        working-directory: tg
+        run: |
+          chmod +x gradlew
+          ./gradlew :TMessagesProj_App:assembleAfatRelease --stacktrace -Dorg.gradle.jvmargs="-Xmx10g -XX:MaxMetaspaceSize=1g" > ../gradle.log 2>&1 || (tail -n 80 ../gradle.log; exit 1)
+          tail -n 15 ../gradle.log
+
+      - name: Report build errors.
+        if: failure()
+        run: |
+          [ -f gradle.log ] || { echo "::error title=Build log::No gradle log"; exit 0; }
+          grep -aE "error:|e: |FAILURE|What went wrong|\* What went wrong|Execution failed|Caused by|> " gradle.log | head -n 60 > errors.txt || true
+          [ -s errors.txt ] || tail -n 60 gradle.log > errors.txt
+          split -l 12 errors.txt chunk_
+          for CHUNK in chunk_*; do
+            MESSAGE="$(sed -e 's/%/%25/g' "$CHUNK" | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=Build log::$MESSAGE"
+          done
+
+      - name: Collect APK.
+        run: |
+          mkdir -p out
+          find tg/TMessagesProj_App/build/outputs/apk -name "*.apk" -exec cp {} out/MWTKgram.apk \;
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MWTKgram-android
+          path: out/MWTKgram.apk
+          retention-days: 14
+
+      - name: Publish release.
+        if: github.ref == 'refs/heads/dev' || github.ref == 'refs/heads/android'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="android-${{ github.run_number }}"
+          gh release create "$TAG" out/MWTKgram.apk \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "MWTKgram Android (build ${{ github.run_number }})" \
+            --notes "Android APK ($APP_VERSION). Install MWTKgram.apk on the phone; allow installing from this source if Android asks." \
+            --latest=false

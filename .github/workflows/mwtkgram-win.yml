@@ -8,6 +8,8 @@ on:
     paths-ignore:
       - '**.md'
       - 'docs/**'
+      - 'android/**'
+      - '.github/workflows/mwtkgram-android.yml'
 
 concurrency:
   group: mwtkgram-win-${{ github.ref }}
