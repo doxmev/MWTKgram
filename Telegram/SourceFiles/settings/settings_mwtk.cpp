@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/style/style_core_scale.h"
 #include "ui/vertical_list.h"
 #include "ui/widgets/buttons.h"
+#include "ui/widgets/color_editor.h"
 #include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/slide_wrap.h"
@@ -124,7 +125,44 @@ void AddPreview(not_null<Ui::VerticalLayout*> container) {
 	}, preview->lifetime());
 }
 
-void AddPalettePicker(not_null<Ui::VerticalLayout*> container) {
+void ShowColorBox(
+		not_null<Window::SessionController*> controller,
+		const QString &title,
+		const char id[],
+		QColor fallback,
+		Fn<void()> done = nullptr) {
+	auto &option = base::options::lookup<int>(id);
+	const auto value = uint(option.value());
+	const auto current = value ? QColor::fromRgba(QRgb(value)) : fallback;
+	controller->show(Box([=, &option](not_null<Ui::GenericBox*> box) {
+		const auto editor = box->addRow(object_ptr<ColorEditor>(
+			box,
+			ColorEditor::Mode::HSL,
+			current));
+		const auto save = [=, &option] {
+			auto color = editor->color();
+			color.setAlpha(255);
+			option.set(int(uint(color.rgba())));
+			if (done) {
+				done();
+			}
+			box->closeBox();
+		};
+		editor->submitRequests(
+		) | rpl::on_next(save, editor->lifetime());
+		box->setFocusCallback([=] {
+			editor->setInnerFocus();
+		});
+		box->addButton(rpl::single(Utf("Сохранить")), save);
+		box->addButton(rpl::single(Utf("Отмена")), [=] { box->closeBox(); });
+		box->setTitle(rpl::single(title));
+		box->setWidth(editor->width());
+	}));
+}
+
+void AddPalettePicker(
+		not_null<Window::SessionController*> controller,
+		not_null<Ui::VerticalLayout*> container) {
 	auto &option = base::options::lookup<int>(::Mwtk::kOptionPalette);
 	const auto count = ::Mwtk::PalettesCount();
 	const auto size = st::settingsButton.height;
@@ -150,7 +188,7 @@ void AddPalettePicker(not_null<Ui::VerticalLayout*> container) {
 			const auto rect = QRectF(layout(i));
 			const auto palette = ::Mwtk::PaletteAt(i, 0.);
 			auto gradient = QLinearGradient(rect.topLeft(), rect.bottomRight());
-			if (i == ::Mwtk::PalettesCount() - 1) {
+			if (i == ::Mwtk::kCustomPaletteIndex - 1) {
 				for (auto k = 0; k != 7; ++k) {
 					gradient.setColorAt(k / 6., QColor::fromHsvF(k / 7.f, 0.85f, 1.f));
 				}
@@ -181,7 +219,16 @@ void AddPalettePicker(not_null<Ui::VerticalLayout*> container) {
 		const auto position = static_cast<QMouseEvent*>(e.get())->pos();
 		for (auto i = 0; i != count; ++i) {
 			if (layout(i).contains(position)) {
-				option.set(i);
+				if (i == ::Mwtk::kCustomPaletteIndex) {
+					ShowColorBox(
+						controller,
+						Utf("Свой цвет"),
+						::Mwtk::kOptionCustomColor,
+						QColor(0, 229, 255),
+						[=, &option] { option.set(i); });
+				} else {
+					option.set(i);
+				}
 				break;
 			}
 		}
@@ -642,7 +689,7 @@ void MwtkSettings::setupContent() {
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Цвет")));
-	AddPalettePicker(content);
+	AddPalettePicker(window, content);
 	Ui::AddSkip(content);
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Яркость")));
 	AddSegmented(content, ::Mwtk::kOptionIntensity, {
@@ -749,6 +796,23 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Объёмные сообщения"), ::Mwtk::kOptionBubbles3d);
 	AddOptionToggle(window, content, Utf("Сообщения в цвет темы"), ::Mwtk::kOptionBubblesTint);
 	AddOptionToggle(window, content, Utf("Объёмные карточки чатов"), ::Mwtk::kOptionCards3d);
+	AddOptionToggle(window, content, Utf("Плавное появление сообщений"), ::Mwtk::kOptionMessageAppear);
+	AddSlider(content, Utf("Непрозрачность списка чатов (при фоне)"), ::Mwtk::kOptionChatListOpacity, 10, 100, Utf("%"));
+	AddOptionToggle(window, content, Utf("Светящиеся аватарки"), ::Mwtk::kOptionAvatarGlow);
+	AddActionButton(content, Utf("Цвет свечения: в сети"), [=] {
+		ShowColorBox(
+			window,
+			Utf("Цвет «в сети»"),
+			::Mwtk::kOptionAvatarOnlineColor,
+			QColor(57, 255, 136));
+	});
+	AddActionButton(content, Utf("Цвет свечения: не в сети"), [=] {
+		ShowColorBox(
+			window,
+			Utf("Цвет «не в сети»"),
+			::Mwtk::kOptionAvatarOfflineColor,
+			::Mwtk::CurrentAvatarGlow().offline);
+	});
 	Ui::AddSkip(content);
 	AddSegmented(content, ::Mwtk::kOptionBubblesOpacity, {
 		::Mwtk::BubbleOpacityName(0),

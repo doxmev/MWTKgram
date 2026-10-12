@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_style.h"
 
 #include "mwtk/mwtk_options.h"
+#include "data/data_peer.h"
+#include "data/data_peer_values.h"
+#include "data/data_user.h"
 #include "ui/chat/message_bubble.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
@@ -89,6 +92,7 @@ bool PaintDialogCard(
 	}
 	p.fillRect(geometry, background);
 	const auto scale = style::Scale() / 100.;
+	const auto alpha = std::clamp(style.alpha, 0.1, 1.);
 	const auto inset = QRectF(geometry).marginsRemoved({
 		6. * scale,
 		2. * scale,
@@ -110,6 +114,7 @@ bool PaintDialogCard(
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing);
 	p.setPen(Qt::NoPen);
+	p.setOpacity(p.opacity() * (active ? std::max(alpha, 0.6) : alpha));
 	const auto depth = std::max(1., 2.5 * scale);
 	p.setBrush(QColor(0, 0, 0, 36));
 	p.drawPath(path.translated(0., depth + 1.5));
@@ -134,6 +139,39 @@ bool PaintDialogCard(
 	p.drawPath(path);
 	p.restore();
 	return true;
+}
+
+void PaintAvatarRing(QPainter &p, QRect rect, PeerData *peer) {
+	if (!peer || rect.isEmpty()) {
+		return;
+	}
+	const auto glow = CurrentAvatarGlow();
+	if (!glow.enabled) {
+		return;
+	}
+	auto online = false;
+	if (const auto user = peer->asUser()) {
+		online = !user->isSelf()
+			&& !user->isBot()
+			&& Data::IsUserOnline(user);
+	}
+	const auto color = online ? glow.online : glow.offline;
+	const auto scale = style::Scale() / 100.;
+	const auto width = (online ? 2.2 : 1.6) * scale;
+	const auto ring = QRectF(rect).marginsAdded(
+		{ width, width, width, width });
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setBrush(Qt::NoBrush);
+	auto halo = color;
+	halo.setAlphaF(online ? 0.35f : 0.18f);
+	p.setPen(QPen(halo, width * 3.));
+	p.drawEllipse(ring);
+	auto core = color;
+	core.setAlphaF(online ? 1.f : 0.75f);
+	p.setPen(QPen(core, width));
+	p.drawEllipse(ring);
+	p.restore();
 }
 
 } // namespace Mwtk

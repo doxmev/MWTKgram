@@ -385,6 +385,9 @@ void SectionWidget::PaintBackground(
 		QRect clip,
 		bool paused) {
 	auto p = QPainter(widget);
+	if (Mwtk::PaintRoomInWindow(p, widget)) {
+		return;
+	}
 	if (fromy) {
 		p.translate(0, fromy);
 		clip = clip.translated(0, -fromy);

@@ -47,6 +47,26 @@ extern const char kOptionUiSounds[];
 extern const char kOptionUiSoundsVolume[];
 extern const char kOptionSendEffect[];
 extern const char kOptionMessageAppear[];
+extern const char kOptionChatListOpacity[];
+extern const char kOptionAvatarGlow[];
+extern const char kOptionAvatarOnlineColor[];
+extern const char kOptionAvatarOfflineColor[];
+extern const char kOptionCustomColor[];
+extern const char kOptionNightEvents[];
+
+inline constexpr auto kCustomPaletteIndex = 7;
+
+// Alpha of the chat list background, 1. when it is opaque.
+[[nodiscard]] double ChatListAlpha();
+[[nodiscard]] bool ChatListTransparent();
+[[nodiscard]] rpl::producer<> ChatListChanges();
+
+struct AvatarGlow {
+	bool enabled = false;
+	QColor online;
+	QColor offline;
+};
+[[nodiscard]] AvatarGlow CurrentAvatarGlow();
 
 inline constexpr auto kPresetCount = 5;
 [[nodiscard]] QString PresetName(int index);
@@ -91,6 +111,7 @@ inline constexpr auto kBubbleOpacityCount = 3;
 struct CardStyle {
 	bool enabled = false;
 	QColor accent;
+	double alpha = 1.;
 };
 [[nodiscard]] CardStyle CurrentCardStyle();
 [[nodiscard]] rpl::producer<> InterfaceConfigChanges();

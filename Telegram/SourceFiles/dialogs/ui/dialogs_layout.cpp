@@ -557,6 +557,16 @@ void PaintRow(
 				&& item
 				&& !item->isEmpty()));
 	}
+	if (from && !(flags & (Flag::SavedMessages | Flag::RepliesMessages | Flag::MyNotes | Flag::HiddenAuthor))) {
+		Mwtk::PaintAvatarRing(
+			p,
+			QRect(
+				context.st->padding.left(),
+				context.st->padding.top(),
+				context.st->photoSize,
+				context.st->photoSize),
+			from);
+	}
 
 	const auto nameleft = context.st->nameLeft;
 	if (context.topicsExpanded > 0.) {

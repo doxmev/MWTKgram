@@ -6,6 +6,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mwtk/mwtk_scene.h"
 
+#include "base/options.h"
+#include "mwtk/mwtk_options.h"
+
 #include <QtGui/QFont>
 #include <QtGui/QLinearGradient>
 #include <QtGui/QPainter>
@@ -21,6 +24,7 @@ namespace {
 
 constexpr auto kPi = 3.14159265358979323846;
 constexpr auto kRainbowIndex = 6;
+constexpr auto kCustomIndex = 7;
 
 struct PaletteData {
 	const char *name;
@@ -38,6 +42,7 @@ const PaletteData kPalettes[] = {
 	{ "Синий", 0xff0047ff, 0xff2fd2ff, 0xff6a5cff, 0xff1f8bff },
 	{ "Жёлтый", 0xffffc400, 0xfffff27a, 0xffff9100, 0xffffd400 },
 	{ "Радуга", 0, 0, 0, 0 },
+	{ "Свой", 0, 0, 0, 0 },
 };
 
 [[nodiscard]] double Clamp(double value, double min, double max) {
@@ -112,6 +117,16 @@ Palette PaletteAt(int index, double time) {
 				1.f);
 		};
 		return { at(0.), at(70.), at(140.), at(35.) };
+	}
+	if (index == kCustomIndex) {
+		const auto base = QColor::fromRgba(QRgb(uint(
+			base::options::value<int>(kOptionCustomColor))));
+		auto hsv = base.toHsv();
+		const auto shifted = QColor::fromHsv(
+			(std::max(hsv.hue(), 0) + 40) % 360,
+			hsv.saturation(),
+			std::max(hsv.value(), 160));
+		return { base, base.lighter(150), shifted, base };
 	}
 	const auto &data = kPalettes[index];
 	return {
@@ -556,7 +571,7 @@ void Scene::paintLabel(
 	p.drawImage(_textGlowOffset, _textGlow);
 	p.setOpacity(opacity);
 
-	if (_config.lite && _config.palette != PalettesCount() - 1) {
+	if (_config.lite && _config.palette != kRainbowIndex) {
 		if (_textImagePalette != _config.palette || _textImage.isNull()) {
 			constexpr auto kQuality = 3.;
 			const auto bounds = _textBounds.toAlignedRect();

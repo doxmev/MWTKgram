@@ -258,6 +258,48 @@ base::options::toggle OptionMessageAppear({
 	.defaultValue = true,
 });
 
+base::options::option<int> OptionChatListOpacity({
+	.id = kOptionChatListOpacity,
+	.name = "MWTKgram chat list opacity",
+	.description = "Opacity of the chat list over the background, percent.",
+	.defaultValue = 100,
+});
+
+base::options::toggle OptionAvatarGlow({
+	.id = kOptionAvatarGlow,
+	.name = "MWTKgram glowing avatars",
+	.description = "Neon ring around avatars in the chat list.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionAvatarOnlineColor({
+	.id = kOptionAvatarOnlineColor,
+	.name = "MWTKgram online ring color",
+	.description = "ARGB color of the avatar ring for online users.",
+	.defaultValue = int(0xff39ff88u),
+});
+
+base::options::option<int> OptionAvatarOfflineColor({
+	.id = kOptionAvatarOfflineColor,
+	.name = "MWTKgram offline ring color",
+	.description = "ARGB color of the avatar ring, 0 for the theme color.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionCustomColor({
+	.id = kOptionCustomColor,
+	.name = "MWTKgram custom color",
+	.description = "ARGB color of the custom palette.",
+	.defaultValue = int(0xff00e5ffu),
+});
+
+base::options::toggle OptionNightEvents({
+	.id = kOptionNightEvents,
+	.name = "MWTKgram night events",
+	.description = "Secrets that appear at 3 AM.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -295,6 +337,12 @@ const char kOptionUiSounds[] = "mwtk-ui-sounds";
 const char kOptionUiSoundsVolume[] = "mwtk-ui-sounds-volume";
 const char kOptionSendEffect[] = "mwtk-send-effect";
 const char kOptionMessageAppear[] = "mwtk-message-appear";
+const char kOptionChatListOpacity[] = "mwtk-chat-list-opacity";
+const char kOptionAvatarGlow[] = "mwtk-avatar-glow";
+const char kOptionAvatarOnlineColor[] = "mwtk-avatar-online-color";
+const char kOptionAvatarOfflineColor[] = "mwtk-avatar-offline-color";
+const char kOptionCustomColor[] = "mwtk-custom-color";
+const char kOptionNightEvents[] = "mwtk-night-events";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -513,9 +561,46 @@ QString BubbleOpacityName(int index) {
 	return QString::fromUtf8("Полупрозрачные");
 }
 
+double ChatListAlpha() {
+	if (!OptionEffects.value() || OptionRoom.value() <= 0) {
+		return 1.;
+	}
+	return std::clamp(OptionChatListOpacity.value(), 10, 100) / 100.;
+}
+
+bool ChatListTransparent() {
+	return ChatListAlpha() < 0.995;
+}
+
+rpl::producer<> ChatListChanges() {
+	return rpl::merge(
+		OptionEffects.changes(),
+		OptionRoom.changes(),
+		OptionChatListOpacity.changes(),
+		OptionAvatarGlow.changes(),
+		OptionAvatarOnlineColor.changes(),
+		OptionAvatarOfflineColor.changes(),
+		OptionCustomColor.changes(),
+		OptionPalette.changes());
+}
+
+AvatarGlow CurrentAvatarGlow() {
+	auto result = AvatarGlow();
+	result.enabled = OptionEffects.value() && OptionAvatarGlow.value();
+	result.online = QColor::fromRgba(QRgb(uint(OptionAvatarOnlineColor.value())));
+	const auto offline = uint(OptionAvatarOfflineColor.value());
+	result.offline = offline
+		? QColor::fromRgba(QRgb(offline))
+		: PaletteAt(
+			std::clamp(OptionPalette.value(), 0, PalettesCount() - 1),
+			0.).first;
+	return result;
+}
+
 CardStyle CurrentCardStyle() {
 	auto result = CardStyle();
 	result.enabled = OptionEffects.value() && OptionCards3d.value();
+	result.alpha = ChatListAlpha();
 	result.accent = PaletteAt(
 		std::clamp(OptionPalette.value(), 0, PalettesCount() - 1),
 		0.).first;
@@ -529,7 +614,12 @@ rpl::producer<> ChatStyleChanges() {
 		OptionBubblesTint.changes(),
 		OptionBubblesOpacity.changes(),
 		OptionCards3d.changes(),
-		OptionPalette.changes());
+		OptionPalette.changes(),
+		OptionCustomColor.changes(),
+		OptionChatListOpacity.changes(),
+		OptionAvatarGlow.changes(),
+		OptionAvatarOnlineColor.changes(),
+		OptionAvatarOfflineColor.changes());
 }
 
 rpl::producer<> InterfaceConfigChanges() {

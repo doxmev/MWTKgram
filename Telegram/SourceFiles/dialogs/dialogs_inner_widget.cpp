@@ -7,6 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "mwtk/mwtk_options.h"
+#include "mwtk/mwtk_room.h"
+
 #include "dialogs/dialogs_three_state_icon.h"
 #include "dialogs/ui/chat_search_empty.h"
 #include "dialogs/ui/chat_search_in.h"
@@ -331,6 +334,19 @@ InnerWidget::InnerWidget(
 	session().downloaderTaskFinished(
 	) | rpl::on_next([=] {
 		invalidateLoadedUserpics();
+		update();
+	}, lifetime());
+
+	rpl::merge(
+		Mwtk::ChatListChanges(),
+		Mwtk::ChatStyleChanges()
+	) | rpl::on_next([=] {
+		update();
+	}, lifetime());
+	Mwtk::RoomRepaintRequests(
+	) | rpl::filter([] {
+		return Mwtk::ChatListTransparent();
+	}) | rpl::on_next([=] {
 		update();
 	}, lifetime());
 
@@ -1048,6 +1064,12 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 		.narrow = (fullWidth < st::columnMinimalWidthLeft / 2),
 		.insideCommunity = communityModeShown(),
 	};
+	if (Mwtk::ChatListTransparent()
+		&& Mwtk::PaintRoomInWindow(p, this)) {
+		auto color = QBrush(context.currentBg).color();
+		color.setAlphaF(color.alphaF() * float(Mwtk::ChatListAlpha()));
+		context.currentBg = QBrush(color);
+	}
 	const auto fillGuard = gsl::finally([&] {
 		// We translate painter down, but it'll be cropped below rect.
 		p.fillRect(rect(), context.currentBg);

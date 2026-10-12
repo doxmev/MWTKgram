@@ -38,7 +38,7 @@ public:
 	[[nodiscard]] static RoomController &Instance();
 
 	[[nodiscard]] RoomType type() const;
-	bool paint(QPainter &p, QSize fill);
+	bool paint(QPainter &p, QSize fill, bool primary);
 	[[nodiscard]] rpl::producer<> repaints() const;
 	[[nodiscard]] QPointF shift() const;
 	[[nodiscard]] double time() const;
@@ -204,16 +204,21 @@ void RoomController::render(QSize size) {
 	_repaints.fire({});
 }
 
-bool RoomController::paint(QPainter &p, QSize fill) {
+bool RoomController::paint(QPainter &p, QSize fill, bool primary) {
 	if (_type == RoomType::None || fill.isEmpty()) {
 		return false;
 	}
-	_wantedSize = fill;
+	if (primary) {
+		_wantedSize = fill;
+	} else if (_wantedSize.isEmpty()) {
+		_wantedSize = fill;
+	}
 	if (_frame.size.isEmpty()) {
-		render(fill);
-	} else if (_frame.size != fill || !(_frameParams == currentParams())) {
+		render(_wantedSize);
+	} else if (_frame.size != _wantedSize
+		|| !(_frameParams == currentParams())) {
 		if (!_renderTimer.isActive()) {
-			_renderTimer.callOnce((_frame.size != fill)
+			_renderTimer.callOnce((_frame.size != _wantedSize)
 				? kResizeRenderDelay
 				: kParamsRenderDelay);
 		}
@@ -409,7 +414,23 @@ RoomType CurrentRoom() {
 }
 
 bool PaintRoom(QPainter &p, QSize fill) {
-	return RoomController::Instance().paint(p, fill);
+	return RoomController::Instance().paint(p, fill, false);
+}
+
+bool PaintRoomInWindow(QPainter &p, not_null<QWidget*> widget) {
+	const auto window = widget->window();
+	if (!window || CurrentRoom() == RoomType::None) {
+		return false;
+	}
+	const auto position = widget->mapTo(window, QPoint());
+	p.save();
+	p.translate(-position);
+	const auto result = RoomController::Instance().paint(
+		p,
+		window->size(),
+		true);
+	p.restore();
+	return result;
 }
 
 rpl::producer<> RoomRepaintRequests() {

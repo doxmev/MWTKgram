@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 class QPainter;
 class QRect;
 class QColor;
+class PeerData;
 
 namespace Mwtk {
 
@@ -20,5 +21,7 @@ void SetupChatStyle();
 	const QColor &background,
 	bool active,
 	bool selected);
+
+void PaintAvatarRing(QPainter &p, QRect rect, PeerData *peer);
 
 } // namespace Mwtk
