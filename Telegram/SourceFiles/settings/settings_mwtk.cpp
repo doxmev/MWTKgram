@@ -20,6 +20,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_deleted.h"
 #include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_hidden.h"
+#include "mwtk/mwtk_appicon.h"
+#include "mwtk/mwtk_hotkeys.h"
+#include "mwtk/mwtk_lyrics.h"
+#include "mwtk/mwtk_notify.h"
+#include "mwtk/mwtk_phrases.h"
+#include "mwtk/mwtk_share.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
 #include "base/timer.h"
@@ -675,11 +681,38 @@ void MwtkSettings::setupContent() {
 	});
 	Ui::AddSkip(content);
 	AddOptionToggle(window, content, Utf("Анимация, когда окно не активно"), ::Mwtk::kOptionBackgroundAnimation);
+	AddOptionToggle(window, content, Utf("Рисовать эффекты на видеокарте"), ::Mwtk::kOptionGpu);
+	AddOptionToggle(window, content, Utf("Режим ноутбука: от батареи — «Низкое»"), ::Mwtk::kOptionLaptopMode);
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
 		content,
 		rpl::producer<QString>(rpl::single(Utf("Низкое — меньше всего нагрузки на процессор. "
+			"«На видеокарте» переносит частицы, надписи и фигуры на GPU: процессор отдыхает. "
+			"Если что-то мигает или пропадает — выключи. "
 			"F9 мгновенно выключает и включает все эффекты."))));
+	Ui::AddSkip(content);
+
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Иконка приложения")));
+	AddSegmented(content, ::Mwtk::kOptionAppIcon, {
+		::Mwtk::AppIcon::Name(0),
+		::Mwtk::AppIcon::Name(1),
+		::Mwtk::AppIcon::Name(2),
+		::Mwtk::AppIcon::Name(3),
+	});
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Уведомления")));
+	AddSegmented(content, ::Mwtk::kOptionNotifyStyle, {
+		::Mwtk::Notify::StyleName(0),
+		::Mwtk::Notify::StyleName(1),
+		::Mwtk::Notify::StyleName(2),
+		::Mwtk::Notify::StyleName(3),
+	});
+	Ui::AddSkip(content);
+	Ui::AddDividerText(
+		content,
+		rpl::producer<QString>(rpl::single(Utf("Стиль видно у всплывающих окон MWTKgram. "
+			"Если в настройках уведомлений включены системные уведомления Windows, "
+			"их рисует сама система."))));
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Визуалы")));
@@ -687,6 +720,8 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Включить надпись doxmev"), ::Mwtk::kOptionWatermark);
 	AddOptionToggle(window, content, Utf("3D-объекты"), ::Mwtk::kOptionObjects);
 	AddOptionToggle(window, content, Utf("Светящиеся частицы"), ::Mwtk::kOptionParticles);
+	AddOptionToggle(window, content, Utf("Времена года: снег, листья, гирлянда"), ::Mwtk::kOptionSeasons);
+	AddOptionToggle(window, content, Utf("Фон в такт музыке"), ::Mwtk::kOptionMusicPulse);
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
@@ -789,11 +824,40 @@ void MwtkSettings::setupContent() {
 	AddActionButton(content, Utf("Мои плейлисты"), [=] {
 		::Mwtk::Playlists::ShowPlaylistsBox(window);
 	});
+	AddOptionToggle(window, content, Utf("Летающий текст песни"), ::Mwtk::kOptionLyrics);
+	AddOptionToggle(window, content, Utf("Искать текст в интернете (LRCLIB)"), ::Mwtk::kOptionLyricsOnline);
+	AddOptionToggle(window, content, Utf("Спрятать чаты, пока играет текст"), ::Mwtk::kOptionHideChats);
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Расположение слов")));
+	AddSegmented(content, ::Mwtk::kOptionLyricsLayout, {
+		::Mwtk::Lyrics::LayoutName(0),
+		::Mwtk::Lyrics::LayoutName(1),
+		::Mwtk::Lyrics::LayoutName(2),
+	});
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Как пропадают слова")));
+	AddSegmented(content, ::Mwtk::kOptionLyricsVanish, {
+		::Mwtk::Lyrics::VanishName(0),
+		::Mwtk::Lyrics::VanishName(1),
+		::Mwtk::Lyrics::VanishName(2),
+	});
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Стиль текста")));
+	AddSegmented(content, ::Mwtk::kOptionLyricsStyle, {
+		::Mwtk::Lyrics::StyleName(0),
+		::Mwtk::Lyrics::StyleName(1),
+		::Mwtk::Lyrics::StyleName(2),
+	});
+	Ui::AddSkip(content);
+	AddSlider(content, Utf("Движение слов"), ::Mwtk::kOptionLyricsMotion, 0, 100, Utf("%"));
+	AddSlider(content, Utf("Размер текста"), ::Mwtk::kOptionLyricsSize, 60, 140, Utf("%"));
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
 		content,
 		rpl::producer<QString>(rpl::single(Utf("Добавить трек: правый клик по музыке в чате → «В плейлист MWTK…». "
-			"Плейлист играет треки по порядку или вперемешку, кнопки «вперёд/назад» в плеере идут по нему."))));
+			"Плейлист играет треки по порядку или вперемешку, кнопки «вперёд/назад» в плеере идут по нему.\n\n"
+			"Текст песни берётся из .lrc рядом с файлом или из базы LRCLIB. Если текста нет или он отстаёт — "
+			"правый клик по треку → «Синхронизировать текст…» или «Сдвиг текста песни…»."))));
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-сообщения и чаты")));
@@ -803,6 +867,14 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Плавное появление сообщений"), ::Mwtk::kOptionMessageAppear);
 	AddSlider(content, Utf("Непрозрачность списка чатов (при фоне)"), ::Mwtk::kOptionChatListOpacity, 10, 100, Utf("%"));
 	AddOptionToggle(window, content, Utf("Светящиеся аватарки"), ::Mwtk::kOptionAvatarGlow);
+	AddOptionToggle(window, content, Utf("В сети: полоска на карточке"), ::Mwtk::kOptionOnlineStripe);
+	AddOptionToggle(window, content, Utf("В сети: подсветка карточки"), ::Mwtk::kOptionOnlineCardGlow);
+	AddOptionToggle(window, content, Utf("В сети: точка"), ::Mwtk::kOptionOnlineDot);
+	AddOptionToggle(window, content, Utf("В сети: пульсирующая точка"), ::Mwtk::kOptionOnlinePulse);
+	AddOptionToggle(window, content, Utf("В сети: аватарка-плитка"), ::Mwtk::kOptionOnlineTile);
+	AddOptionToggle(window, content, Utf("Пролёт аватарки при новом сообщении"), ::Mwtk::kOptionFlyby);
+	AddOptionToggle(window, content, Utf("Пролёт только для закреплённых чатов"), ::Mwtk::kOptionFlybyFavorites);
+	AddOptionToggle(window, content, Utf("Голографический профиль"), ::Mwtk::kOptionHoloProfile);
 	AddActionButton(content, Utf("Цвет свечения: в сети"), [=] {
 		ShowColorBox(
 			window,
@@ -851,6 +923,49 @@ void MwtkSettings::setupContent() {
 	AddActionButton(content, Utf("Удалённые сообщения"), [=] {
 		::Mwtk::Deleted::ShowBox(window, nullptr);
 	});
+	AddOptionToggle(window, content, Utf("Быстрые фразы через «/»"), ::Mwtk::kOptionQuickPhrases);
+	AddActionButton(content, Utf("Мои быстрые фразы"), [=] {
+		::Mwtk::Phrases::ShowEditBox(window);
+	});
+	AddActionButton(content, Utf("Поделиться темой MWTK (файл)"), [=] {
+		::Mwtk::Share::ExportTheme(window);
+	});
+	AddActionButton(content, Utf("Синхронизировать с телефоном (в «Избранное»)"), [=] {
+		::Mwtk::Share::SendSync(window);
+	});
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Горячие клавиши")));
+	for (auto i = 0; i != int(::Mwtk::Hotkeys::Action::Count); ++i) {
+		const auto action = ::Mwtk::Hotkeys::Action(i);
+		const auto button = content->add(object_ptr<Button>(
+			content,
+			rpl::single(::Mwtk::Hotkeys::ActionName(action)),
+			st::settingsButtonNoIcon));
+		const auto label = Ui::CreateChild<Ui::FlatLabel>(
+			button,
+			rpl::single(rpl::empty) | rpl::then(
+				::Mwtk::Hotkeys::Changes()
+			) | rpl::map([=] {
+				const auto key = ::Mwtk::Hotkeys::Get(action);
+				return key.isEmpty()
+					? Utf("нет")
+					: key.toString(QKeySequence::NativeText);
+			}),
+			st::defaultFlatLabel);
+		label->setAttribute(Qt::WA_TransparentForMouseEvents);
+		rpl::combine(
+			button->widthValue(),
+			label->widthValue()
+		) | rpl::on_next([=](int outer, int width) {
+			label->moveToRight(
+				st::settingsButtonNoIcon.padding.right(),
+				(button->height() - label->height()) / 2,
+				outer);
+		}, label->lifetime());
+		button->setClickedCallback([=] {
+			::Mwtk::Hotkeys::ShowCaptureBox(window, action);
+		});
+	}
 	AddOptionToggle(window, content, Utf("Показывать ID в профиле"), Info::Profile::kOptionShowPeerIdBelowAbout);
 	AddOptionToggle(window, content, Utf("Дата вступления в канал в профиле"), Info::Profile::kOptionShowChannelJoinedBelowAbout);
 	AddOptionToggle(window, content, Utf("«Открыть профиль» в меню чата"), ::Window::kOptionViewProfileInChatsListContextMenu);
@@ -863,7 +978,9 @@ void MwtkSettings::setupContent() {
 	Ui::AddDividerText(
 		content,
 		rpl::producer<QString>(rpl::single(Utf("MWTKgram основан на открытом коде Telegram Desktop. "
-			"ID в профиле можно скопировать нажатием."))));
+			"ID в профиле можно скопировать нажатием. Свои названия чатов, напоминания и заметки — "
+			"в меню чата и сообщения (правый клик). F9 — эффекты, F8 — летающие чаты, "
+			"Ctrl+Shift+L — скрытые чаты."))));
 
 	Ui::ResizeFitChild(this, content);
 }

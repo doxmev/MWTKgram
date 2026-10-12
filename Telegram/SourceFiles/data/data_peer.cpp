@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_peer.h"
 
+#include "mwtk/mwtk_names.h"
+
 #include "api/api_sensitive_content.h"
 #include "data/data_user.h"
 #include "data/data_chat.h"
@@ -319,10 +321,26 @@ Main::Account &PeerData::account() const {
 	return session().account();
 }
 
+void PeerData::mwtkRefreshName() {
+	const auto original = Mwtk::Names::Original(this);
+	if (const auto user = asUser()) {
+		updateNameDelayed(
+			original,
+			user->nameOrPhone,
+			user->editableUsername());
+	} else if (const auto channel = asChannel()) {
+		updateNameDelayed(original, QString(), channel->editableUsername());
+	} else {
+		updateNameDelayed(original, QString(), QString());
+	}
+}
+
 void PeerData::updateNameDelayed(
-		const QString &newName,
+		const QString &serverName,
 		const QString &newNameOrPhone,
 		const QString &newUsername) {
+	// MWTKgram: a local "for me" name replaces the one from the server.
+	const auto newName = Mwtk::Names::Resolve(this, serverName);
 	if (_name == newName && _nameVersion > 1) {
 		if (isUser()) {
 			if (asUser()->nameOrPhone == newNameOrPhone

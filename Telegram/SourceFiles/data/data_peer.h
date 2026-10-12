@@ -381,6 +381,8 @@ public:
 
 	[[nodiscard]] int nameVersion() const;
 	[[nodiscard]] const QString &name() const;
+	// MWTKgram: re-applies a local "for me" name (or removes it).
+	void mwtkRefreshName();
 	[[nodiscard]] const QString &shortName() const;
 	[[nodiscard]] const QString &topBarNameText() const;
 

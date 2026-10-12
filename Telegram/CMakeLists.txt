@@ -2364,24 +2364,34 @@ PRIVATE
     mwtk/mwtk_notify.h
     mwtk/mwtk_holo.cpp
     mwtk/mwtk_holo.h
+    mwtk/mwtk_hotkeys.cpp
+    mwtk/mwtk_hotkeys.h
     mwtk/mwtk_lyrics.cpp
     mwtk/mwtk_lyrics.h
+    mwtk/mwtk_names.cpp
+    mwtk/mwtk_names.h
     mwtk/mwtk_notes.cpp
     mwtk/mwtk_notes.h
     mwtk/mwtk_options.cpp
     mwtk/mwtk_options.h
     mwtk/mwtk_overlay.cpp
     mwtk/mwtk_overlay.h
+    mwtk/mwtk_reminders.cpp
+    mwtk/mwtk_reminders.h
     mwtk/mwtk_room.cpp
     mwtk/mwtk_room.h
     mwtk/mwtk_room_render.cpp
     mwtk/mwtk_room_render.h
     mwtk/mwtk_scene.cpp
     mwtk/mwtk_scene.h
+    mwtk/mwtk_phrases.cpp
+    mwtk/mwtk_phrases.h
     mwtk/mwtk_playlists.cpp
     mwtk/mwtk_playlists.h
     mwtk/mwtk_seasons.cpp
     mwtk/mwtk_seasons.h
+    mwtk/mwtk_share.cpp
+    mwtk/mwtk_share.h
     mwtk/mwtk_sounds.cpp
     mwtk/mwtk_sounds.h
     mwtk/mwtk_style.cpp

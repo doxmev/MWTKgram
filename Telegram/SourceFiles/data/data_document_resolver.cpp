@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_document_resolver.h"
 
+#include "mwtk/mwtk_share.h"
+
 #include "base/platform/base_platform_info.h"
 #include "boxes/abstract_box.h" // Ui::show().
 #include "chat_helpers/ttl_media_layer_widget.h"
@@ -294,6 +296,9 @@ void ResolveDocument(
 					clickHandlerContext.show = controller->uiShow();
 				}
 				context = QVariant::fromValue(clickHandlerContext);
+			}
+			if (controller && Mwtk::Share::HandleOpen(controller, path)) {
+				return;
 			}
 			if (!Core::App().iv().showMarkdown(path, context)) {
 				LaunchWithWarning(path, item);

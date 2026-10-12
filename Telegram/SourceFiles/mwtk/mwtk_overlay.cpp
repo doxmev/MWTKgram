@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_appicon.h"
 #include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_hidden.h"
+#include "mwtk/mwtk_hotkeys.h"
 #include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_sounds.h"
 #include "mwtk/mwtk_style.h"
@@ -1013,6 +1014,7 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 
 	Sounds::Setup();
 	AppIcon::Setup();
+	Hotkeys::Setup();
 	Lyrics::Setup(body);
 	Hidden::Setup();
 	Floating::Setup();

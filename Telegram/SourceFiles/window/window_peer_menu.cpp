@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mwtk/mwtk_deleted.h"
 #include "mwtk/mwtk_hidden.h"
+#include "mwtk/mwtk_names.h"
 #include "mwtk/mwtk_notes.h"
 
 #include "base/call_delayed.h"
@@ -341,6 +342,7 @@ private:
 	void addShareContact();
 	void addEditContact();
 	void addMwtkNote();
+	void addMwtkRename();
 	void addMwtkHide();
 	void addMwtkDeleted();
 	void addBotToGroup();
@@ -1186,6 +1188,20 @@ void Filler::addMwtkNote() {
 		&st::menuIconEdit);
 }
 
+void Filler::addMwtkRename() {
+	if (_topic || _sublist || !_peer || _peer->isSelf()) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	_addAction(
+		(Mwtk::Names::Get(peer).isEmpty()
+			? QString::fromUtf8("Своё название (MWTK)")
+			: QString::fromUtf8("Изменить своё название (MWTK)")),
+		[=] { Mwtk::Names::ShowEditBox(controller, peer); },
+		&st::menuIconEdit);
+}
+
 void Filler::addMwtkHide() {
 	if (_topic || _sublist || !_peer || _peer->isSelf()) {
 		return;
@@ -1988,6 +2004,7 @@ void Filler::fillHistoryActions() {
 	addCreateTopic();
 	addInfo();
 	addMwtkNote();
+	addMwtkRename();
 	addMwtkHide();
 	addMwtkDeleted();
 	addViewAsTopics();
@@ -2016,6 +2033,7 @@ void Filler::fillProfileActions() {
 	addShareContact();
 	addEditContact();
 	addMwtkNote();
+	addMwtkRename();
 	addBotToGroup();
 	addNewMembers();
 	addSendGift();

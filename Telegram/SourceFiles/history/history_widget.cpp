@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_widget.h"
 
+#include "mwtk/mwtk_phrases.h"
+
 #include "api/api_compose_with_ai.h"
 #include "api/api_editing.h"
 #include "api/api_bot.h"
@@ -452,6 +454,7 @@ HistoryWidget::HistoryWidget(
 	setupGiftToChannelButton();
 	setupDirectMessageButton();
 	_reportMessages->addClickHandler([=] { reportSelectedMessages(); });
+	Mwtk::Phrases::Attach(_field.data(), controller);
 	_field->submits(
 	) | rpl::on_next([=](Qt::KeyboardModifiers modifiers) {
 		sendWithModifiers(modifiers);

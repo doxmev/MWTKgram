@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/view/history_view_context_menu.h"
 
 #include "mwtk/mwtk_lyrics.h"
+#include "mwtk/mwtk_reminders.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_attached_stickers.h"
@@ -628,6 +629,7 @@ bool AddForwardMessageAction(
 					: MessageIdsList{ 1, itemId }));
 		}
 	}, &st::menuIconForward);
+	Mwtk::Reminders::FillMenu(menu, list->controller(), itemId);
 	return true;
 }
 

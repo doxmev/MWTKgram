@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_appear.h"
 #include "mwtk/mwtk_deleted.h"
 #include "mwtk/mwtk_lyrics.h"
+#include "mwtk/mwtk_reminders.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_polls.h"
@@ -3491,6 +3492,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardItem(itemId);
 					}, &st::menuIconForward);
 				}
+				Mwtk::Reminders::FillMenu(_menu.get(), _controller, itemId);
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
 						Api::AddOfferToMessage(_controller->uiShow(), itemId);
@@ -3795,6 +3797,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 						forwardAsGroup(itemId);
 					}, &st::menuIconForward);
 				}
+				Mwtk::Reminders::FillMenu(_menu.get(), _controller, itemId);
 				if (HistoryView::CanAddOfferToMessage(item)) {
 					_menu->addAction(tr::lng_context_add_offer(tr::now), [=] {
 						Api::AddOfferToMessage(_controller->uiShow(), itemId);

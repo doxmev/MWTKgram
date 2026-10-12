@@ -152,5 +152,6 @@ struct CardStyle {
 [[nodiscard]] int OptionInt(const char id[]);
 [[nodiscard]] QString OptionString(const char id[]);
 [[nodiscard]] rpl::producer<> OptionChanges(const char id[]);
+[[nodiscard]] std::vector<const char*> AllOptionIds();
 
 } // namespace Mwtk
