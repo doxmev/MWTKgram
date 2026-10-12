@@ -71,6 +71,8 @@ private:
 	bool _frameAnimated = false;
 	crl::time _frameDelay = 33;
 	ButtonState _button;
+	QPoint _lastCursor;
+	QPointer<QWidget> _lastHovered;
 
 	struct TrailPoint {
 		QPointF position;

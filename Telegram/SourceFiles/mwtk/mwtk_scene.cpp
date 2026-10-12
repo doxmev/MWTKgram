@@ -274,6 +274,7 @@ double Scene::focal() const {
 void Scene::rebuildText() {
 	_textPath = QPainterPath();
 	_textGlow = QImage();
+	_textImage = QImage();
 	if (_size.isEmpty() || _config.label.isEmpty()) {
 		return;
 	}
@@ -489,16 +490,28 @@ QRegion Scene::takeDirtyRegion() {
 }
 
 void Scene::paint(QPainter &p) const {
+	paint(p, QRegion());
+}
+
+void Scene::paint(QPainter &p, const QRegion &clip) const {
 	if (empty()) {
 		return;
 	}
+	const auto clipBounds = clip.boundingRect();
 	const auto palette = PaletteAt(_config.palette, _time);
 	auto order = std::vector<const Body*>();
 	order.reserve(_bodies.size());
 	for (const auto &body : _bodies) {
-		if (enabled(body.kind)) {
-			order.push_back(&body);
+		if (!enabled(body.kind)) {
+			continue;
 		}
+		if (!clip.isEmpty()) {
+			const auto rect = bodyRect(body);
+			if (!rect.intersects(clipBounds) || !clip.intersects(rect)) {
+				continue;
+			}
+		}
+		order.push_back(&body);
 	}
 	std::sort(order.begin(), order.end(), [](const Body *a, const Body *b) {
 		return a->z > b->z;
@@ -542,6 +555,35 @@ void Scene::paintLabel(
 	p.setOpacity(opacity * (0.5 + 0.35 * pulse));
 	p.drawImage(_textGlowOffset, _textGlow);
 	p.setOpacity(opacity);
+
+	if (_config.lite && _config.palette != PalettesCount() - 1) {
+		if (_textImagePalette != _config.palette || _textImage.isNull()) {
+			constexpr auto kQuality = 3.;
+			const auto bounds = _textBounds.toAlignedRect();
+			_textImage = QImage(
+				bounds.size() * kQuality,
+				QImage::Format_ARGB32_Premultiplied);
+			_textImage.fill(Qt::transparent);
+			auto q = QPainter(&_textImage);
+			q.setRenderHint(QPainter::Antialiasing);
+			q.scale(kQuality, kQuality);
+			q.translate(-bounds.topLeft());
+			auto fill = QLinearGradient(
+				_textBounds.left(),
+				0.,
+				_textBounds.right(),
+				0.);
+			fill.setColorAt(0., palette.first);
+			fill.setColorAt(0.5, palette.second);
+			fill.setColorAt(1., palette.third);
+			q.fillPath(_textPath, fill);
+			q.end();
+			_textImagePalette = _config.palette;
+		}
+		p.drawImage(QRectF(_textBounds.toAlignedRect()), _textImage);
+		p.restore();
+		return;
+	}
 
 	const auto width = std::max(1., _textBounds.width());
 	const auto shift = std::fmod(

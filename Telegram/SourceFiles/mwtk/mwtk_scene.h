@@ -42,6 +42,7 @@ struct SceneConfig {
 	double opacity = 0.6;
 	double scale = 1.;
 	double density = 1.;
+	bool lite = false;
 	QString label = QStringLiteral("doxmev");
 };
 
@@ -53,6 +54,7 @@ public:
 	void resize(QSize size);
 	void advance(double seconds);
 	void paint(QPainter &p) const;
+	void paint(QPainter &p, const QRegion &clip) const;
 
 	[[nodiscard]] QRegion takeDirtyRegion();
 	[[nodiscard]] bool empty() const;
@@ -124,6 +126,8 @@ private:
 	QRectF _textBounds;
 	QImage _textGlow;
 	QPointF _textGlowOffset;
+	mutable QImage _textImage;
+	mutable int _textImagePalette = -1;
 
 	std::vector<Shape> _shapes;
 	std::vector<Body> _bodies;

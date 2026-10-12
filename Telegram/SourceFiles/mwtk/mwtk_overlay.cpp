@@ -496,7 +496,12 @@ QRegion VisualsWidget::tickButtons(double dt) {
 		}
 		return QRegion();
 	}
-	const auto hovered = findHoveredButton();
+	const auto cursor = QCursor::pos();
+	if (cursor != _lastCursor || (_lastHovered && !_lastHovered->isVisible())) {
+		_lastCursor = cursor;
+		_lastHovered = findHoveredButton();
+	}
+	const auto hovered = _lastHovered.data();
 	if (hovered) {
 		const auto goal = QRectF(
 			QRect(hovered->mapTo(parentWidget(), QPoint()), hovered->size())
@@ -766,7 +771,7 @@ void VisualsWidget::paintButtons(QPainter &p) const {
 void VisualsWidget::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	if (_sceneEnabled) {
-		_scene.paint(p);
+		_scene.paint(p, e->region());
 	}
 	if (_followOptions) {
 		paintFrame(p);

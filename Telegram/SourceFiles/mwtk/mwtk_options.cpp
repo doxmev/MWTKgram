@@ -298,10 +298,10 @@ QString QualityName(int index) {
 
 Quality CurrentQuality() {
 	switch (std::clamp(OptionQuality.value(), 0, kQualityCount - 1)) {
-	case 0: return { 50, 0.45, 0.5, 160, false };
-	case 2: return { 16, 1., 1., 460, true };
+	case 0: return { 66, 0.4, 0.5, 160, false };
+	case 2: return { 20, 1., 1., 460, true };
 	}
-	return { 33, 0.75, 0.7, 300, false };
+	return { 40, 0.7, 0.7, 300, false };
 }
 
 QString IntensityName(int index) {
@@ -345,7 +345,9 @@ SceneConfig CurrentConfig(double scale) {
 	result.opacity = IntensityOpacity(
 		std::clamp(OptionIntensity.value(), 0, kIntensityCount - 1));
 	result.scale = scale;
-	result.density = CurrentQuality().density;
+	const auto quality = CurrentQuality();
+	result.density = quality.density;
+	result.lite = !quality.decorativeMotion;
 	return result;
 }
 
