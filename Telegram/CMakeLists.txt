@@ -2352,6 +2352,8 @@ PRIVATE
     mainwindow.h
     mwtk/mwtk_appear.cpp
     mwtk/mwtk_appear.h
+    mwtk/mwtk_deleted.cpp
+    mwtk/mwtk_deleted.h
     mwtk/mwtk_hidden.cpp
     mwtk/mwtk_hidden.h
     mwtk/mwtk_notes.cpp

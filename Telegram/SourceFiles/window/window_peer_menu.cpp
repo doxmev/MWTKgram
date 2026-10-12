@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_peer_menu.h"
 
+#include "mwtk/mwtk_deleted.h"
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_notes.h"
 
@@ -341,6 +342,7 @@ private:
 	void addEditContact();
 	void addMwtkNote();
 	void addMwtkHide();
+	void addMwtkDeleted();
 	void addBotToGroup();
 	void addNewMembers();
 	void addDeleteContact();
@@ -1198,6 +1200,18 @@ void Filler::addMwtkHide() {
 		&st::menuIconLock);
 }
 
+void Filler::addMwtkDeleted() {
+	if (_topic || _sublist || !_peer || !Mwtk::Deleted::HasAny(_peer)) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	_addAction(
+		QString::fromUtf8("Удалённые сообщения (MWTK)"),
+		[=] { Mwtk::Deleted::ShowBox(controller, peer); },
+		&st::menuIconDelete);
+}
+
 void Filler::addBotToGroup() {
 	const auto user = _peer->asUser();
 	if (!user) {
@@ -1975,6 +1989,7 @@ void Filler::fillHistoryActions() {
 	addInfo();
 	addMwtkNote();
 	addMwtkHide();
+	addMwtkDeleted();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();

@@ -53,6 +53,7 @@ extern const char kOptionAvatarOnlineColor[];
 extern const char kOptionAvatarOfflineColor[];
 extern const char kOptionCustomColor[];
 extern const char kOptionNightEvents[];
+extern const char kOptionSaveDeleted[];
 
 inline constexpr auto kCustomPaletteIndex = 7;
 

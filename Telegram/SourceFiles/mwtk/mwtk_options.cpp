@@ -302,6 +302,13 @@ base::options::toggle OptionNightEvents({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionSaveDeleted({
+	.id = kOptionSaveDeleted,
+	.name = "MWTKgram save deleted messages",
+	.description = "Keep a local copy of deleted messages.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -345,6 +352,7 @@ const char kOptionAvatarOnlineColor[] = "mwtk-avatar-online-color";
 const char kOptionAvatarOfflineColor[] = "mwtk-avatar-offline-color";
 const char kOptionCustomColor[] = "mwtk-custom-color";
 const char kOptionNightEvents[] = "mwtk-night-events";
+const char kOptionSaveDeleted[] = "mwtk-save-deleted";
 
 QString QualityName(int index) {
 	switch (index) {
