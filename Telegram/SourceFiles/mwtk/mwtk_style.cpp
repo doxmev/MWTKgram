@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QLinearGradient>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
+#include <QtGui/QRadialGradient>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
@@ -156,21 +157,26 @@ void PaintAvatarRing(QPainter &p, QRect rect, PeerData *peer) {
 			&& Data::IsUserOnline(user);
 	}
 	const auto color = online ? glow.online : glow.offline;
-	const auto scale = style::Scale() / 100.;
-	const auto width = (online ? 2.2 : 1.6) * scale;
-	const auto ring = QRectF(rect).marginsAdded(
-		{ width, width, width, width });
+	// A soft halo outside the userpic, not a crisp ring: a ring reads as
+	// an unseen story.
+	const auto center = QRectF(rect).center();
+	const auto r = rect.width() / 2.;
+	const auto outer = r * 1.32;
+	auto halo = QRadialGradient(center, outer);
+	const auto edge = std::clamp(r / outer, 0.1, 0.99);
+	auto c0 = color;
+	c0.setAlphaF(online ? 0.55f : 0.32f);
+	auto c1 = color;
+	c1.setAlphaF(0.f);
+	halo.setColorAt(0., c1);
+	halo.setColorAt(edge - 0.02, c1);
+	halo.setColorAt(edge, c0);
+	halo.setColorAt(1., c1);
 	p.save();
 	p.setRenderHint(QPainter::Antialiasing);
-	p.setBrush(Qt::NoBrush);
-	auto halo = color;
-	halo.setAlphaF(online ? 0.35f : 0.18f);
-	p.setPen(QPen(halo, width * 3.));
-	p.drawEllipse(ring);
-	auto core = color;
-	core.setAlphaF(online ? 1.f : 0.75f);
-	p.setPen(QPen(core, width));
-	p.drawEllipse(ring);
+	p.setPen(Qt::NoPen);
+	p.setBrush(halo);
+	p.drawEllipse(center, outer, outer);
 	p.restore();
 }
 
