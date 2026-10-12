@@ -17,6 +17,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_overlay.h"
+#include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
 #include "base/timer.h"
@@ -837,6 +838,9 @@ void MwtkSettings::setupContent() {
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Полезные функции")));
+	AddActionButton(content, Utf("Скрытые чаты (Ctrl+Shift+L)"), [=] {
+		::Mwtk::Hidden::Open(window);
+	});
 	AddOptionToggle(window, content, Utf("Показывать ID в профиле"), Info::Profile::kOptionShowPeerIdBelowAbout);
 	AddOptionToggle(window, content, Utf("Дата вступления в канал в профиле"), Info::Profile::kOptionShowChannelJoinedBelowAbout);
 	AddOptionToggle(window, content, Utf("«Открыть профиль» в меню чата"), ::Window::kOptionViewProfileInChatsListContextMenu);

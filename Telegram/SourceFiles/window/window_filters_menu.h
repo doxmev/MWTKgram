@@ -82,6 +82,7 @@ private:
 	Ui::VerticalLayout *_list = nullptr;
 	std::unique_ptr<Ui::VerticalLayoutReorder> _reorder;
 	base::unique_qptr<Ui::SideBarButton> _setup;
+	base::unique_qptr<Ui::SideBarButton> _mwtkHidden;
 	base::unique_qptr<Ui::SlideWrap<FolderFavoriteButton>> _favorite;
 	base::flat_map<FilterId, base::unique_qptr<Ui::SideBarButton>> _filters;
 	base::weak_qptr<Ui::SideBarButton> _tabStop;

@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history.h"
 
+#include "mwtk/mwtk_hidden.h"
+
 #include "history/view/history_view_element.h"
 #include "history/view/history_view_item_preview.h"
 #include "history/view/history_view_translate_tracker.h"
@@ -3464,6 +3466,8 @@ bool History::trackUnreadMessages() const {
 
 bool History::shouldBeInChatList() const {
 	if (peer->migrateTo() || !folderKnown()) {
+		return false;
+	} else if (Mwtk::Hidden::IsHidden(peer)) {
 		return false;
 	} else if (const auto community = peer->asChannel()
 		; community && community->isCommunity()) {

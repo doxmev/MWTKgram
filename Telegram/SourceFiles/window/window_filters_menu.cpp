@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/window_filters_menu.h"
 
+#include "mwtk/mwtk_hidden.h"
+
 #include "menu/menu_mark_as_read.h"
 #include "mainwindow.h"
 #include "window/window_session_controller.h"
@@ -198,6 +200,14 @@ void FiltersMenu::setup() {
 			-1,
 			{ TextWithEntities{ tr::lng_filters_setup(tr::now) } },
 			Ui::FilterIcon::Edit);
+		_mwtkHidden = prepareButton(
+			_container,
+			-2,
+			{ TextWithEntities{ QString::fromUtf8("Скрытые") } },
+			Ui::FilterIcon::Private);
+		_mwtkHidden->setClickedCallback([=] {
+			Mwtk::Hidden::Open(_session);
+		});
 		if (_favorite) {
 			_favorite = nullptr;
 			updateFavorite();
@@ -440,6 +450,14 @@ void FiltersMenu::setupList() {
 		-1,
 		{ TextWithEntities{ tr::lng_filters_setup(tr::now) } },
 		Ui::FilterIcon::Edit);
+	_mwtkHidden = prepareButton(
+		_container,
+		-2,
+		{ TextWithEntities{ QString::fromUtf8("Скрытые") } },
+		Ui::FilterIcon::Private);
+	_mwtkHidden->setClickedCallback([=] {
+		Mwtk::Hidden::Open(_session);
+	});
 	_reorder = std::make_unique<Ui::VerticalLayoutReorder>(_list, &_scroll);
 
 	_reorder->updates(
