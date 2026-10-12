@@ -68,12 +68,15 @@ struct AvatarGlow {
 };
 [[nodiscard]] AvatarGlow CurrentAvatarGlow();
 
+// True between 3:00 and 3:59 local time when night events are enabled.
+[[nodiscard]] bool NightEventActive();
+
 inline constexpr auto kPresetCount = 5;
 [[nodiscard]] QString PresetName(int index);
 void ApplyPreset(int index);
 
 inline constexpr auto kBackgroundCount = 6;
-inline constexpr auto kSceneBaseCount = 3;
+inline constexpr auto kSceneBaseCount = 5;
 inline constexpr auto kSceneTimeCount = 3;
 [[nodiscard]] QString BackgroundName(int index);
 [[nodiscard]] QString SceneBaseName(int index);

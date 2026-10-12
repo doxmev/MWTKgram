@@ -31,6 +31,8 @@ enum class SceneBase {
 	Forest = 0,
 	Neon = 1,
 	Space = 2,
+	City = 3,
+	Underwater = 4,
 };
 
 struct RoomParams {
@@ -49,6 +51,7 @@ struct RoomParams {
 	QString notes;
 	QString photo;
 	int dim = 30;
+	bool night = false;
 
 	friend inline bool operator==(
 			const RoomParams &a,
@@ -67,7 +70,8 @@ struct RoomParams {
 			&& (a.fog == b.fog)
 			&& (a.notes == b.notes)
 			&& (a.photo == b.photo)
-			&& (a.dim == b.dim);
+			&& (a.dim == b.dim)
+			&& (a.night == b.night);
 	}
 };
 

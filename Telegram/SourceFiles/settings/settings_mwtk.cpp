@@ -774,6 +774,7 @@ void MwtkSettings::setupContent() {
 	AddSlider(scene, Utf("Угол обзора"), ::Mwtk::kOptionRoomFov, 45, 110, Utf("°"));
 	AddOptionToggle(window, content, Utf("Фон следует за мышью"), ::Mwtk::kOptionRoomParallax);
 	AddOptionToggle(window, content, Utf("Покачивание камеры и туман"), ::Mwtk::kOptionRoomMotion);
+	AddOptionToggle(window, content, Utf("Секреты в 3 часа ночи"), ::Mwtk::kOptionNightEvents);
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
 		content,

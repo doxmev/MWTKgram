@@ -163,6 +163,17 @@ const char *kNotes[] = {
 	"НЕ ОСТАНАВЛИВАЙСЯ",
 };
 
+const char *kNightNotes[] = {
+	"ТЫ НЕ СПИШЬ?",
+	"3:33",
+	"ОБЕРНИСЬ",
+	"ОН УЖЕ ЗДЕСЬ",
+	"ПОЧЕМУ ТЫ НЕ СПИШЬ",
+	"Я ВИЖУ ТЕБЯ",
+	"НЕ ВЫКЛЮЧАЙ СВЕТ",
+	"doxmev знает",
+};
+
 [[nodiscard]] const std::vector<Tree> &ForestTrees() {
 	static const auto result = [] {
 		auto trees = std::vector<Tree>();
@@ -549,8 +560,21 @@ void RenderForest(
 		const RoomParams &params,
 		const Camera &camera,
 		QSize full) {
-	const auto look = MakeForestLook(params.timeOfDay, params.fog);
-	const auto notes = ParseNotes(params.notes);
+	auto look = MakeForestLook(params.timeOfDay, params.fog);
+	auto notes = ParseNotes(params.notes);
+	if (params.night) {
+		look.fog = Mix(look.fog, QColor(70, 0, 4), 0.55);
+		look.skyMid = Mix(look.skyMid, QColor(40, 0, 0), 0.6);
+		look.disc = QColor(200, 20, 20);
+		look.glow = QColor(255, 0, 0, 90);
+		look.fogDensity *= 1.7;
+		if (params.notes.trimmed().isEmpty()) {
+			notes.clear();
+			for (const auto note : kNightNotes) {
+				notes.push_back(QString::fromUtf8(note));
+			}
+		}
+	}
 	const auto fog = look.fog;
 	frame.fog = fog;
 	struct Visible {
@@ -618,6 +642,35 @@ void RenderForest(
 				PaintTree(p, camera, *entry.tree, entry.depth, look, notes);
 			}
 		}
+		if (params.night && band.depth > 8. && band.depth < 20.) {
+			auto random = std::mt19937(333);
+			auto unit = std::uniform_real_distribution<double>(0., 1.);
+			p.setPen(Qt::NoPen);
+			for (auto i = 0; i != 5; ++i) {
+				const auto angle = unit(random) * 2. * kPi;
+				const auto radius = 9. + unit(random) * 7.;
+				auto depth = 0.;
+				const auto eye = camera.project({
+					std::sin(angle) * radius,
+					1.5 + unit(random) * 0.4,
+					std::cos(angle) * radius,
+				}, &depth);
+				if (depth < 1.) {
+					continue;
+				}
+				const auto r = std::max(1.2, camera.focal() / depth * 0.035);
+				const auto gap = r * 3.2;
+				for (const auto dx : { -gap / 2., gap / 2. }) {
+					auto glow = QRadialGradient(eye + QPointF(dx, 0.), r * 4.);
+					glow.setColorAt(0., QColor(255, 0, 0, 120));
+					glow.setColorAt(1., QColor(255, 0, 0, 0));
+					p.setBrush(glow);
+					p.drawEllipse(eye + QPointF(dx, 0.), r * 4., r * 4.);
+					p.setBrush(QColor(255, 40, 40));
+					p.drawEllipse(eye + QPointF(dx, 0.), r, r * 0.7);
+				}
+			}
+		}
 		if (band.depth > 20.) {
 			const auto horizon = camera.horizonY();
 			auto mist = QLinearGradient(0, horizon - camera.focal() * 0.12, 0, horizon + camera.focal() * 0.06);
@@ -675,7 +728,9 @@ void RenderNeon(
 
 	constexpr auto kHalf = 8.;
 	constexpr auto kHeight = 4.6;
-	const auto floorColor = params.accent.isValid()
+	const auto floorColor = params.night
+		? QColor(255, 10, 20)
+		: params.accent.isValid()
 		? params.accent
 		: QColor(255, 47, 208);
 	const auto wallColor = QColor(34, 224, 255);
@@ -926,6 +981,368 @@ void RenderSpace(
 	}
 }
 
+struct Building {
+	double x = 0.;
+	double z = 0.;
+	double width = 6.;
+	double height = 20.;
+	double shade = 0.;
+	int seed = 0;
+	bool sign = false;
+};
+
+[[nodiscard]] const std::vector<Building> &CityBuildings() {
+	static const auto result = [] {
+		auto list = std::vector<Building>();
+		auto random = std::mt19937(31337);
+		auto unit = std::uniform_real_distribution<double>(0., 1.);
+		for (auto i = 0; i != 140; ++i) {
+			const auto ring = (i < 50) ? 0 : (i < 100) ? 1 : 2;
+			const auto radius = (ring == 0)
+				? (34. + unit(random) * 16.)
+				: (ring == 1)
+				? (58. + unit(random) * 30.)
+				: (95. + unit(random) * 60.);
+			const auto angle = unit(random) * 2. * kPi;
+			auto building = Building();
+			building.x = std::sin(angle) * radius;
+			building.z = std::cos(angle) * radius;
+			building.width = 6. + unit(random) * 9.;
+			building.height = (ring == 0)
+				? (8. + unit(random) * 20.)
+				: (ring == 1)
+				? (16. + unit(random) * 34.)
+				: (26. + unit(random) * 60.);
+			building.shade = unit(random);
+			building.seed = int(unit(random) * 100000);
+			building.sign = (ring == 0) && (unit(random) < 0.45);
+			list.push_back(building);
+		}
+		return list;
+	}();
+	return result;
+}
+
+void PaintBuilding(
+		QPainter &p,
+		const Camera &camera,
+		const Building &building,
+		double depth,
+		const RoomParams &params,
+		QColor fog,
+		QColor accent) {
+	const auto length = std::max(
+		std::sqrt(building.x * building.x + building.z * building.z),
+		0.01);
+	const auto side = Vec{ building.z / length, 0., -building.x / length };
+	const auto half = building.width / 2.;
+	const auto corner = [&](double sx, double y) {
+		return camera.project({
+			building.x + side.x * half * sx,
+			y,
+			building.z + side.z * half * sx,
+		});
+	};
+	const auto bl = corner(-1., 0.);
+	const auto br = corner(1., 0.);
+	const auto tl = corner(-1., building.height);
+	const auto tr = corner(1., building.height);
+	const auto fogAmount = 1. - std::exp(-depth * 0.012 * (0.4 + params.fog / 50.));
+	auto face = QPolygonF();
+	face << bl << br << tr << tl;
+	const auto body = Mix(
+		Mix(QColor(10, 10, 22), QColor(22, 18, 40), building.shade),
+		fog,
+		fogAmount * 0.85);
+	p.setPen(Qt::NoPen);
+	p.setBrush(body);
+	p.drawPolygon(face);
+
+	auto random = std::mt19937(building.seed);
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+	const auto cols = std::max(2, int(building.width / 1.4));
+	const auto rows = std::max(3, int(building.height / 1.8));
+	const auto lit = params.night
+		? 0.04
+		: (0.12 + 0.5 * Clamp(params.density, 0, 100) / 100.);
+	const auto lerp = [](QPointF a, QPointF b, double t) {
+		return a + (b - a) * t;
+	};
+	const auto at = [&](double u, double v) {
+		return lerp(lerp(bl, br, u), lerp(tl, tr, u), v);
+	};
+	const auto warm = QColor(255, 196, 110);
+	for (auto r = 0; r != rows; ++r) {
+		for (auto c = 0; c != cols; ++c) {
+			if (unit(random) > lit) {
+				continue;
+			}
+			const auto u0 = (c + 0.25) / cols;
+			const auto u1 = (c + 0.75) / cols;
+			const auto v0 = (r + 0.3) / rows;
+			const auto v1 = (r + 0.7) / rows;
+			auto window = QPolygonF();
+			window << at(u0, v0) << at(u1, v0) << at(u1, v1) << at(u0, v1);
+			const auto color = (unit(random) < 0.25) ? accent : warm;
+			p.setBrush(WithAlpha(
+				Mix(color, fog, fogAmount),
+				0.85 * (1. - fogAmount * 0.6)));
+			p.drawPolygon(window);
+		}
+	}
+	if (building.sign && depth < 60.) {
+		const auto signColor = params.night ? QColor(255, 20, 30) : accent;
+		auto sign = QPolygonF();
+		sign << at(0.15, 0.62) << at(0.85, 0.62) << at(0.85, 0.7) << at(0.15, 0.7);
+		const auto width = std::max(1., camera.focal() / depth * 0.08);
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(WithAlpha(signColor, 0.25), width * 4.));
+		p.drawPolygon(sign);
+		p.setPen(QPen(WithAlpha(signColor, 0.95), width));
+		p.drawPolygon(sign);
+		p.setPen(Qt::NoPen);
+	}
+}
+
+void RenderCity(
+		RoomFrame &frame,
+		const RoomParams &params,
+		const Camera &camera,
+		QSize full) {
+	const auto accent = params.accent.isValid()
+		? params.accent
+		: QColor(255, 47, 208);
+	const auto fog = params.night ? QColor(40, 6, 10) : QColor(36, 24, 58);
+	frame.fog = fog;
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto horizon = camera.horizonY();
+		auto sky = QLinearGradient(0, horizon - camera.focal(), 0, horizon);
+		sky.setColorAt(0., params.night ? QColor(4, 0, 2) : QColor(6, 4, 18));
+		sky.setColorAt(0.7, params.night ? QColor(30, 2, 6) : QColor(30, 14, 48));
+		sky.setColorAt(1., Mix(fog, accent, 0.25));
+		p.fillRect(QRect(QPoint(), full), sky);
+		auto random = std::mt19937(99);
+		auto unit = std::uniform_real_distribution<double>(0., 1.);
+		p.setPen(Qt::NoPen);
+		for (auto i = 0; i != 140; ++i) {
+			auto depth = 0.;
+			const auto point = camera.project(SkyDirection(
+				unit(random) * 2. * kPi,
+				0.2 + unit(random) * 1.2,
+				900.), &depth);
+			if (depth > 1.) {
+				p.setBrush(QColor(220, 220, 255, int(40 + unit(random) * 110)));
+				p.drawEllipse(point, 0.8, 0.8);
+			}
+		}
+		auto depth = 0.;
+		const auto moon = camera.project(SkyDirection(2.2, 0.5, 900.), &depth);
+		if (depth > 1.) {
+			const auto r = camera.focal() * 0.04;
+			const auto moonColor = params.night
+				? QColor(220, 40, 40)
+				: QColor(236, 230, 255);
+			auto glow = QRadialGradient(moon, r * 7.);
+			glow.setColorAt(0., WithAlpha(moonColor, 0.35));
+			glow.setColorAt(1., WithAlpha(moonColor, 0.));
+			p.setBrush(glow);
+			p.drawEllipse(moon, r * 7., r * 7.);
+			p.setBrush(moonColor);
+			p.drawEllipse(moon, r, r);
+		}
+		auto ground = QLinearGradient(0, horizon, 0, full.height());
+		ground.setColorAt(0., Mix(fog, accent, 0.2));
+		ground.setColorAt(0.1, QColor(10, 8, 18));
+		ground.setColorAt(1., QColor(4, 4, 8));
+		p.fillRect(
+			QRectF(0, horizon, full.width(), std::max(0., full.height() - horizon)),
+			ground);
+		p.end();
+		frame.layers.push_back({ std::move(image), 0. });
+	}
+	struct Visible {
+		const Building *building = nullptr;
+		double depth = 0.;
+	};
+	auto visible = std::vector<Visible>();
+	for (const auto &building : CityBuildings()) {
+		const auto c = camera.toCamera({ building.x, building.height / 2., building.z });
+		if (c.z < 1.) {
+			continue;
+		}
+		visible.push_back({ &building, c.z });
+	}
+	std::sort(visible.begin(), visible.end(), [](const Visible &a, const Visible &b) {
+		return a.depth > b.depth;
+	});
+	struct Band {
+		double from = 0.;
+		double till = 0.;
+		double depth = 0.;
+	};
+	const Band bands[] = {
+		{ 70., 1000., 60. },
+		{ 0., 70., 30. },
+	};
+	for (const auto &band : bands) {
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		for (const auto &entry : visible) {
+			if (entry.depth >= band.from && entry.depth < band.till) {
+				PaintBuilding(p, camera, *entry.building, entry.depth, params, fog, accent);
+			}
+		}
+		p.end();
+		frame.layers.push_back({ std::move(image), band.depth });
+	}
+}
+
+void RenderUnderwater(
+		RoomFrame &frame,
+		const RoomParams &params,
+		const Camera &camera,
+		QSize full) {
+	const auto accent = params.accent.isValid()
+		? params.accent
+		: QColor(0, 220, 255);
+	const auto deep = params.night ? QColor(2, 4, 8) : QColor(2, 18, 40);
+	const auto shallow = params.night ? QColor(8, 20, 28) : QColor(10, 110, 140);
+	frame.fog = Mix(deep, shallow, 0.4);
+	auto random = std::mt19937(4096);
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+	const auto density = Clamp(params.density, 0, 100) / 100.;
+	const auto horizon = camera.horizonY();
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		auto water = QLinearGradient(0, horizon - camera.focal(), 0, full.height());
+		water.setColorAt(0., shallow);
+		water.setColorAt(0.55, Mix(shallow, deep, 0.6));
+		water.setColorAt(1., deep);
+		p.fillRect(QRect(QPoint(), full), water);
+		p.setPen(Qt::NoPen);
+		const auto rays = 9;
+		for (auto i = 0; i != rays; ++i) {
+			const auto x = full.width() * (0.05 + 0.9 * unit(random));
+			const auto spread = full.width() * (0.04 + 0.06 * unit(random));
+			auto ray = QPolygonF();
+			ray << QPointF(x - spread * 0.3, 0.)
+				<< QPointF(x + spread * 0.3, 0.)
+				<< QPointF(x + spread * 2.2, full.height())
+				<< QPointF(x - spread * 0.8, full.height());
+			auto light = QLinearGradient(0, 0, 0, full.height());
+			const auto alpha = (params.night ? 0.03 : 0.1) * Clamp(params.fog, 0, 100) / 50.;
+			light.setColorAt(0., QColor::fromRgbF(0.8f, 1.f, 1.f, float(alpha)));
+			light.setColorAt(1., QColor::fromRgbF(0.8f, 1.f, 1.f, 0.f));
+			p.setBrush(light);
+			p.drawPolygon(ray);
+		}
+		auto sand = QLinearGradient(0, horizon, 0, full.height());
+		sand.setColorAt(0., Mix(deep, QColor(90, 80, 50), 0.15));
+		sand.setColorAt(1., Mix(deep, QColor(140, 120, 80), 0.35));
+		p.setBrush(sand);
+		p.drawRect(QRectF(0, horizon, full.width(), std::max(0., full.height() - horizon)));
+		p.end();
+		frame.layers.push_back({ std::move(image), 0. });
+	}
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto plants = 30 + int(density * 70);
+		for (auto i = 0; i != plants; ++i) {
+			const auto angle = unit(random) * 2. * kPi;
+			const auto radius = 6. + unit(random) * 40.;
+			const auto base = Vec{ std::sin(angle) * radius, 0., std::cos(angle) * radius };
+			auto depth = 0.;
+			const auto root = camera.project(base, &depth);
+			if (depth < 0.8) {
+				continue;
+			}
+			const auto height = 2. + unit(random) * 6.;
+			const auto top = camera.project({ base.x, height, base.z });
+			const auto bend = (unit(random) - 0.5) * (root.y() - top.y()) * 0.5;
+			auto path = QPainterPath(root);
+			path.cubicTo(
+				root + QPointF(bend, (top.y() - root.y()) * 0.33),
+				top + QPointF(-bend, (root.y() - top.y()) * 0.33),
+				top);
+			const auto fade = std::exp(-depth * 0.04);
+			const auto color = (i % 4 == 0)
+				? Mix(accent, deep, 1. - fade)
+				: Mix(QColor(20, 120, 70), deep, 1. - fade);
+			p.setPen(QPen(
+				color,
+				std::max(1., camera.focal() / depth * 0.12),
+				Qt::SolidLine,
+				Qt::RoundCap));
+			p.setBrush(Qt::NoBrush);
+			p.drawPath(path);
+		}
+		p.end();
+		frame.layers.push_back({ std::move(image), 14. });
+	}
+	{
+		auto image = MakeLayerImage(params, full);
+		auto p = QPainter(&image);
+		p.setRenderHint(QPainter::Antialiasing);
+		p.setPen(Qt::NoPen);
+		const auto fish = 6 + int(density * 18);
+		for (auto i = 0; i != fish; ++i) {
+			auto depth = 0.;
+			const auto center = camera.project(SkyDirection(
+				unit(random) * 2. * kPi,
+				(unit(random) - 0.2) * 0.5,
+				6. + unit(random) * 20.), &depth);
+			if (depth < 0.8) {
+				continue;
+			}
+			const auto size = camera.focal() / depth * (0.25 + unit(random) * 0.3);
+			const auto dir = (unit(random) < 0.5) ? -1. : 1.;
+			const auto color = Mix(
+				(i % 3 == 0) ? accent : QColor(255, 170, 60),
+				deep,
+				1. - std::exp(-depth * 0.05));
+			p.setBrush(color);
+			p.drawEllipse(center, size, size * 0.42);
+			auto tail = QPolygonF();
+			tail << center + QPointF(-dir * size * 0.9, 0.)
+				<< center + QPointF(-dir * size * 1.5, -size * 0.4)
+				<< center + QPointF(-dir * size * 1.5, size * 0.4);
+			p.drawPolygon(tail);
+		}
+		const auto bubbles = 20 + int(density * 60);
+		for (auto i = 0; i != bubbles; ++i) {
+			const auto point = QPointF(
+				unit(random) * full.width(),
+				unit(random) * full.height());
+			const auto r = 1. + unit(random) * 4.;
+			p.setBrush(Qt::NoBrush);
+			p.setPen(QPen(QColor(200, 255, 255, 90), 1.));
+			p.drawEllipse(point, r, r);
+		}
+		if (params.night) {
+			for (auto i = 0; i != 3; ++i) {
+				const auto point = QPointF(
+					full.width() * (0.2 + 0.6 * unit(random)),
+					horizon + (full.height() - horizon) * 0.2 * unit(random));
+				const auto r = full.width() * 0.006;
+				p.setPen(Qt::NoPen);
+				p.setBrush(QColor(255, 30, 30, 200));
+				p.drawEllipse(point, r, r);
+				p.drawEllipse(point + QPointF(r * 3.5, 0.), r, r);
+			}
+		}
+		p.end();
+		frame.layers.push_back({ std::move(image), 6. });
+	}
+}
+
 [[nodiscard]] QImage LoadPhoto(const QString &path) {
 	static auto cachedPath = QString();
 	static auto cached = QImage();
@@ -1116,6 +1533,12 @@ RoomFrame RenderRoom(const RoomParams &params, QSize size) {
 			break;
 		case SceneBase::Space:
 			RenderSpace(result, params, camera, full);
+			break;
+		case SceneBase::City:
+			RenderCity(result, params, camera, full);
+			break;
+		case SceneBase::Underwater:
+			RenderUnderwater(result, params, camera, full);
 			break;
 		default:
 			RenderForest(result, params, camera, full);

@@ -69,6 +69,8 @@ private:
 	QString _videoPath;
 	QSize _videoRequest;
 	base::Timer _videoTimer;
+	base::Timer _clockTimer;
+	bool _night = false;
 	crl::time _videoLastRepaint = 0;
 	rpl::lifetime _lifetime;
 
@@ -80,7 +82,16 @@ RoomController::RoomController()
 , _videoTimer([=] {
 	_videoLastRepaint = crl::now();
 	_repaints.fire({});
+})
+, _clockTimer([=] {
+	const auto night = NightEventActive();
+	if (_night != night) {
+		_night = night;
+		_repaints.fire({});
+	}
 }) {
+	_night = NightEventActive();
+	_clockTimer.callEach(60 * crl::time(1000));
 	RoomConfigChanges(
 	) | rpl::on_next([=] {
 		refresh();
@@ -157,6 +168,7 @@ RoomParams RoomController::currentParams() const {
 	result.scale = quality.roomScale;
 	result.trees = quality.trees;
 	result.accent = PaletteAt(OptionInt(kOptionPalette), 0.).first;
+	result.night = NightEventActive();
 	if (_type == RoomType::Custom) {
 		result.base = SceneBase(
 			std::clamp(OptionInt(kOptionSceneBase), 0, kSceneBaseCount - 1));

@@ -8,6 +8,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/options.h"
 
+#include <QtCore/QTime>
+
 #include <algorithm>
 
 namespace Mwtk {
@@ -457,6 +459,8 @@ QString SceneBaseName(int index) {
 	switch (index) {
 	case 1: return QString::fromUtf8("Неон");
 	case 2: return QString::fromUtf8("Космос");
+	case 3: return QString::fromUtf8("Город");
+	case 4: return QString::fromUtf8("Под водой");
 	}
 	return QString::fromUtf8("Лес");
 }
@@ -582,6 +586,12 @@ rpl::producer<> ChatListChanges() {
 		OptionAvatarOfflineColor.changes(),
 		OptionCustomColor.changes(),
 		OptionPalette.changes());
+}
+
+bool NightEventActive() {
+	return OptionEffects.value()
+		&& OptionNightEvents.value()
+		&& (QTime::currentTime().hour() == 3);
 }
 
 AvatarGlow CurrentAvatarGlow() {
