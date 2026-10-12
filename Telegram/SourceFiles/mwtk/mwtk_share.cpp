@@ -264,7 +264,7 @@ void ExportTheme(not_null<Window::SessionController*> controller) {
 	const auto data = kThemeMagic
 		+ QJsonDocument(root).toJson(QJsonDocument::Indented);
 	FileDialog::GetWritePath(
-		controller->widget(),
+		controller->widget().get(),
 		QString::fromUtf8("Сохранить тему MWTK"),
 		u"MWTK theme (*.mwtktheme)"_q,
 		u"MWTK.mwtktheme"_q,

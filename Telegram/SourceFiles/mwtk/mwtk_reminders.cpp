@@ -54,7 +54,7 @@ void Schedule(
 	if (!item) {
 		return;
 	}
-	const auto saved = session->data().history(session->user());
+	const auto saved = session->data().history(session->userPeerId());
 	auto options = Api::SendOptions();
 	options.scheduled = std::max(when, base::unixtime::now() + 60);
 	auto action = Api::SendAction(saved, options);
