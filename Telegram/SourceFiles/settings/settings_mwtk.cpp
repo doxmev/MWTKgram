@@ -18,6 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_overlay.h"
 #include "mwtk/mwtk_deleted.h"
+#include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
@@ -839,6 +840,9 @@ void MwtkSettings::setupContent() {
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Полезные функции")));
+	AddActionButton(content, Utf("Летающие чаты (F8)"), [=] {
+		::Mwtk::Floating::Toggle(window);
+	});
 	AddActionButton(content, Utf("Скрытые чаты (Ctrl+Shift+L)"), [=] {
 		::Mwtk::Hidden::Open(window);
 	});

@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
 #include "mwtk/mwtk_appear.h"
+#include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_sounds.h"
 #include "mwtk/mwtk_style.h"
@@ -803,6 +804,7 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 
 	Sounds::Setup();
 	Hidden::Setup();
+	Floating::Setup();
 	Core::App().domain().activeSessionValue(
 	) | rpl::map([](Main::Session *session) {
 		return session
