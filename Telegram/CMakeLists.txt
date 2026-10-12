@@ -2350,6 +2350,8 @@ PRIVATE
     mainwidget.h
     mainwindow.cpp
     mainwindow.h
+    mwtk/mwtk_appear.cpp
+    mwtk/mwtk_appear.h
     mwtk/mwtk_notes.cpp
     mwtk/mwtk_notes.h
     mwtk/mwtk_options.cpp

@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/history_inner_widget.h"
 
+#include "mwtk/mwtk_appear.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_polls.h"
@@ -1691,7 +1692,22 @@ void HistoryInner::paintEvent(QPaintEvent *e) {
 				context.fullMessageSelected = selection.fullMessageSelected;
 				context.messageSelection = selection.messageSelection;
 				context.highlight = _widget->itemHighlight(item);
-				view->draw(p, context);
+				const auto appear = Mwtk::Appear::Progress(item);
+				if (appear >= 0.) {
+					p.save();
+					Mwtk::Appear::Apply(p, appear, item->out(), width());
+					view->draw(p, context);
+					p.restore();
+					if (!_mwtkAppearScheduled) {
+						_mwtkAppearScheduled = true;
+						base::call_delayed(16, this, [=] {
+							_mwtkAppearScheduled = false;
+							update();
+						});
+					}
+				} else {
+					view->draw(p, context);
+				}
 				processPainted(view, top, height);
 			}
 			top += height;

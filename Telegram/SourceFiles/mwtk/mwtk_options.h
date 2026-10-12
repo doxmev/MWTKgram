@@ -46,6 +46,7 @@ extern const char kOptionCursorTrail[];
 extern const char kOptionUiSounds[];
 extern const char kOptionUiSoundsVolume[];
 extern const char kOptionSendEffect[];
+extern const char kOptionMessageAppear[];
 
 inline constexpr auto kPresetCount = 5;
 [[nodiscard]] QString PresetName(int index);

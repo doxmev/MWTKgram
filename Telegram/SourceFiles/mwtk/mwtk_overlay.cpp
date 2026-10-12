@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/event_filter.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
+#include "mwtk/mwtk_appear.h"
 #include "mwtk/mwtk_sounds.h"
 #include "mwtk/mwtk_style.h"
 #include "core/application.h"
@@ -800,6 +801,15 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 	overlay->raise();
 
 	Sounds::Setup();
+	Core::App().domain().activeSessionValue(
+	) | rpl::map([](Main::Session *session) {
+		return session
+			? session->data().newItemAdded()
+			: rpl::never<not_null<HistoryItem*>>();
+	}) | rpl::flatten_latest(
+	) | rpl::on_next([](not_null<HistoryItem*> item) {
+		Appear::Register(item);
+	}, overlay->lifetime());
 	Core::App().domain().activeSessionValue(
 	) | rpl::map([](Main::Session *session) {
 		return session

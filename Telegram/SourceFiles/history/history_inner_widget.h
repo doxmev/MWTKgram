@@ -633,6 +633,7 @@ private:
 	std::unique_ptr<HistoryView::GramReadLine> _gramReadLine;
 	QPainterPath _highlightPathCache;
 	bool _isChatWide = false;
+	bool _mwtkAppearScheduled = false;
 	bool _removeFromUserpics = false;
 
 	base::flat_set<not_null<const HistoryItem*>> _animatedStickersPlayed;

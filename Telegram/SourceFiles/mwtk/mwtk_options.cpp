@@ -251,6 +251,13 @@ base::options::toggle OptionSendEffect({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionMessageAppear({
+	.id = kOptionMessageAppear,
+	.name = "MWTKgram message appear animation",
+	.description = "New messages slide in smoothly.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -287,6 +294,7 @@ const char kOptionCursorTrail[] = "mwtk-cursor-trail";
 const char kOptionUiSounds[] = "mwtk-ui-sounds";
 const char kOptionUiSoundsVolume[] = "mwtk-ui-sounds-volume";
 const char kOptionSendEffect[] = "mwtk-send-effect";
+const char kOptionMessageAppear[] = "mwtk-message-appear";
 
 QString QualityName(int index) {
 	switch (index) {
