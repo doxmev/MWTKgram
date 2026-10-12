@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "platform/win/tray_win.h"
 
+#include "mwtk/mwtk_options.h"
+
 #include "base/invoke_queued.h"
 #include "base/qt_signal_producer.h"
 #include "core/application.h"
@@ -110,6 +112,17 @@ bool DarkTasbarValueValid/* = false*/;
 	static auto ScaledLogoNoMargin = base::flat_map<int, QImage>();
 	static auto ScaledLogoDark = base::flat_map<int, QImage>();
 	static auto ScaledLogoLight = base::flat_map<int, QImage>();
+	static auto ScaledIcon = -1;
+
+	// MWTKgram: drop scaled copies when the app icon was switched.
+	const auto icon = Mwtk::OptionInt(Mwtk::kOptionAppIcon);
+	if (ScaledIcon != icon) {
+		ScaledIcon = icon;
+		ScaledLogo.clear();
+		ScaledLogoNoMargin.clear();
+		ScaledLogoDark.clear();
+		ScaledLogoLight.clear();
+	}
 
 	const auto darkMode = IsDarkTaskbar();
 	auto &scaled = (monochrome && darkMode)

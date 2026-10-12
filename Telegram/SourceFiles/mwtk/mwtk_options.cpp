@@ -6,6 +6,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mwtk/mwtk_options.h"
 
+#include "base/timer.h"
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif // Q_OS_WIN
+
 #include "base/options.h"
 
 #include <QtCore/QTime>
@@ -316,6 +322,167 @@ base::options::toggle OptionKeepDeletedInChat({
 	.defaultValue = true,
 });
 
+base::options::toggle OptionGpu({
+	.id = kOptionGpu,
+	.name = "MWTKgram GPU rendering",
+	.description = "Draw MWTK effects on the video card.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionLaptopMode({
+	.id = kOptionLaptopMode,
+	.name = "MWTKgram laptop mode",
+	.description = "Use the low preset while running on battery.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionAppIcon({
+	.id = kOptionAppIcon,
+	.name = "MWTKgram app icon",
+	.description = "Index of the application icon.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionNotifyStyle({
+	.id = kOptionNotifyStyle,
+	.name = "MWTKgram notification style",
+	.description = "0 plain, 1 hologram, 2 neon, 3 block.",
+	.defaultValue = 1,
+});
+
+base::options::toggle OptionOnlineStripe({
+	.id = kOptionOnlineStripe,
+	.name = "MWTKgram online stripe",
+	.description = "Glowing stripe on cards of online chats.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionOnlineCardGlow({
+	.id = kOptionOnlineCardGlow,
+	.name = "MWTKgram online card glow",
+	.description = "Cards of online chats glow.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionOnlinePulse({
+	.id = kOptionOnlinePulse,
+	.name = "MWTKgram online pulse",
+	.description = "The online dot breathes.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionOnlineTile({
+	.id = kOptionOnlineTile,
+	.name = "MWTKgram online tile",
+	.description = "Rounded-square userpics for online users.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionOnlineDot({
+	.id = kOptionOnlineDot,
+	.name = "MWTKgram online dot",
+	.description = "Show the online dot.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionLyrics({
+	.id = kOptionLyrics,
+	.name = "MWTKgram lyrics",
+	.description = "Flying synced lyrics while music plays.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionLyricsOnline({
+	.id = kOptionLyricsOnline,
+	.name = "MWTKgram lyrics search",
+	.description = "Look up synced lyrics in LRCLIB.",
+	.defaultValue = true,
+});
+
+base::options::option<int> OptionLyricsLayout({
+	.id = kOptionLyricsLayout,
+	.name = "MWTKgram lyrics layout",
+	.description = "0 words, 1 cascade, 2 line.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionLyricsVanish({
+	.id = kOptionLyricsVanish,
+	.name = "MWTKgram lyrics vanish",
+	.description = "0 sparks, 1 fade, 2 fly away.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionLyricsStyle({
+	.id = kOptionLyricsStyle,
+	.name = "MWTKgram lyrics style",
+	.description = "0 neon, 1 3D, 2 pixels.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionLyricsMotion({
+	.id = kOptionLyricsMotion,
+	.name = "MWTKgram lyrics motion",
+	.description = "Word drift, percent.",
+	.defaultValue = 60,
+});
+
+base::options::option<int> OptionLyricsSize({
+	.id = kOptionLyricsSize,
+	.name = "MWTKgram lyrics size",
+	.description = "Text size, percent.",
+	.defaultValue = 100,
+});
+
+base::options::toggle OptionHideChats({
+	.id = kOptionHideChats,
+	.name = "MWTKgram hide chats for lyrics",
+	.description = "Hide the interface while lyrics play.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionMusicPulse({
+	.id = kOptionMusicPulse,
+	.name = "MWTKgram music pulse",
+	.description = "Background reacts to the beat.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionSeasons({
+	.id = kOptionSeasons,
+	.name = "MWTKgram seasons",
+	.description = "Snow, leaves and holidays in scenes.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionFlyby({
+	.id = kOptionFlyby,
+	.name = "MWTKgram message fly-by",
+	.description = "Userpic flies over the background on new messages.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionFlybyFavorites({
+	.id = kOptionFlybyFavorites,
+	.name = "MWTKgram fly-by only favorites",
+	.description = "Fly-by only for pinned chats.",
+	.defaultValue = false,
+});
+
+base::options::toggle OptionHoloProfile({
+	.id = kOptionHoloProfile,
+	.name = "MWTKgram holographic profile",
+	.description = "Hologram effect on profile cards.",
+	.defaultValue = true,
+});
+
+base::options::toggle OptionQuickPhrases({
+	.id = kOptionQuickPhrases,
+	.name = "MWTKgram quick phrases",
+	.description = "Suggest saved phrases after typing a slash.",
+	.defaultValue = true,
+});
+
 } // namespace
 
 const char kOptionVisuals[] = "mwtk-visuals";
@@ -361,6 +528,29 @@ const char kOptionCustomColor[] = "mwtk-custom-color";
 const char kOptionNightEvents[] = "mwtk-night-events";
 const char kOptionSaveDeleted[] = "mwtk-save-deleted";
 const char kOptionKeepDeletedInChat[] = "mwtk-keep-deleted-in-chat";
+const char kOptionGpu[] = "mwtk-gpu";
+const char kOptionLaptopMode[] = "mwtk-laptop-mode";
+const char kOptionAppIcon[] = "mwtk-app-icon";
+const char kOptionNotifyStyle[] = "mwtk-notify-style";
+const char kOptionOnlineStripe[] = "mwtk-online-stripe";
+const char kOptionOnlineCardGlow[] = "mwtk-online-card-glow";
+const char kOptionOnlinePulse[] = "mwtk-online-pulse";
+const char kOptionOnlineTile[] = "mwtk-online-tile";
+const char kOptionOnlineDot[] = "mwtk-online-dot";
+const char kOptionLyrics[] = "mwtk-lyrics";
+const char kOptionLyricsOnline[] = "mwtk-lyrics-online";
+const char kOptionLyricsLayout[] = "mwtk-lyrics-layout";
+const char kOptionLyricsVanish[] = "mwtk-lyrics-vanish";
+const char kOptionLyricsStyle[] = "mwtk-lyrics-style";
+const char kOptionLyricsMotion[] = "mwtk-lyrics-motion";
+const char kOptionLyricsSize[] = "mwtk-lyrics-size";
+const char kOptionHideChats[] = "mwtk-hide-chats";
+const char kOptionMusicPulse[] = "mwtk-music-pulse";
+const char kOptionSeasons[] = "mwtk-seasons";
+const char kOptionFlyby[] = "mwtk-flyby";
+const char kOptionFlybyFavorites[] = "mwtk-flyby-favorites";
+const char kOptionHoloProfile[] = "mwtk-holo-profile";
+const char kOptionQuickPhrases[] = "mwtk-quick-phrases";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -370,7 +560,59 @@ QString QualityName(int index) {
 	return QString::fromUtf8("Среднее");
 }
 
+namespace {
+
+[[nodiscard]] bool ReadOnBattery() {
+#ifdef Q_OS_WIN
+	auto status = SYSTEM_POWER_STATUS();
+	if (GetSystemPowerStatus(&status)) {
+		// 0 = offline (battery), 1 = online, 255 = unknown.
+		// BatteryFlag 128 = no system battery (desktop PC).
+		return (status.ACLineStatus == 0) && (status.BatteryFlag != 128);
+	}
+#endif // Q_OS_WIN
+	return false;
+}
+
+struct PowerWatcher {
+	bool onBattery = false;
+	rpl::event_stream<> changes;
+	std::unique_ptr<base::Timer> timer;
+};
+
+[[nodiscard]] PowerWatcher &Power() {
+	static auto result = PowerWatcher();
+	if (!result.timer) {
+		result.onBattery = ReadOnBattery();
+		result.timer = std::make_unique<base::Timer>([] {
+			auto &power = Power();
+			const auto now = ReadOnBattery();
+			if (power.onBattery != now) {
+				power.onBattery = now;
+				power.changes.fire({});
+			}
+		});
+		result.timer->callEach(20 * crl::time(1000));
+	}
+	return result;
+}
+
+} // namespace
+
+bool LaptopSavingActive() {
+	return OptionLaptopMode.value() && Power().onBattery;
+}
+
+rpl::producer<> LaptopSavingChanges() {
+	return rpl::merge(
+		OptionLaptopMode.changes(),
+		Power().changes.events());
+}
+
 Quality CurrentQuality() {
+	if (LaptopSavingActive()) {
+		return { 66, 0.4, 0.5, 160, false };
+	}
 	switch (std::clamp(OptionQuality.value(), 0, kQualityCount - 1)) {
 	case 0: return { 66, 0.4, 0.5, 160, false };
 	case 2: return { 20, 1., 1., 460, true };
@@ -427,6 +669,7 @@ SceneConfig CurrentConfig(double scale) {
 
 rpl::producer<> ConfigChanges() {
 	return rpl::merge(
+		LaptopSavingChanges(),
 		OptionEffects.changes(),
 		OptionQuality.changes(),
 		OptionBackgroundAnimation.changes(),
@@ -440,6 +683,8 @@ rpl::producer<> ConfigChanges() {
 
 rpl::producer<> RoomConfigChanges() {
 	return rpl::merge(
+		LaptopSavingChanges(),
+		OptionNightEvents.changes(),
 		OptionEffects.changes(),
 		OptionRoom.changes(),
 		OptionRoomYaw.changes(),
@@ -594,6 +839,11 @@ bool ChatListTransparent() {
 
 rpl::producer<> ChatListChanges() {
 	return rpl::merge(
+		OptionOnlineStripe.changes(),
+		OptionOnlineCardGlow.changes(),
+		OptionOnlinePulse.changes(),
+		OptionOnlineTile.changes(),
+		OptionOnlineDot.changes(),
 		OptionEffects.changes(),
 		OptionRoom.changes(),
 		OptionChatListOpacity.changes(),
@@ -650,6 +900,11 @@ rpl::producer<> ChatStyleChanges() {
 
 rpl::producer<> InterfaceConfigChanges() {
 	return rpl::merge(
+		OptionFlyby.changes(),
+		OptionSeasons.changes(),
+		OptionMusicPulse.changes(),
+		OptionGpu.changes(),
+		LaptopSavingChanges(),
 		OptionEffects.changes(),
 		OptionUiScene.changes(),
 		OptionButtons3d.changes(),
@@ -666,6 +921,10 @@ bool OptionValue(const char id[]) {
 
 int OptionInt(const char id[]) {
 	return base::options::value<int>(id);
+}
+
+rpl::producer<> OptionChanges(const char id[]) {
+	return base::options::details::Lookup(id).changes();
 }
 
 QString OptionString(const char id[]) {

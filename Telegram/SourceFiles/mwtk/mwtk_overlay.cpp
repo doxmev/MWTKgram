@@ -10,16 +10,26 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
 #include "mwtk/mwtk_appear.h"
+#include "mwtk/mwtk_appicon.h"
 #include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_hidden.h"
+#include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_sounds.h"
 #include "mwtk/mwtk_style.h"
 #include "core/application.h"
+#include "media/audio/media_audio.h"
 #include "data/data_session.h"
+#include "history/history.h"
 #include "history/history_item.h"
+#include "data/data_peer.h"
+#include "ui/userpic_view.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "ui/abstract_button.h"
+#include "ui/gl/gl_detection.h"
+#include "ui/gl/gl_surface.h"
+#include "ui/painter.h"
+#include "ui/rp_widget.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
 
@@ -68,6 +78,27 @@ constexpr auto kButtonGlow = 12;
 		a.height() + (b.height() - a.height()) * k);
 }
 
+class GpuRenderer final : public Ui::GL::Renderer {
+public:
+	explicit GpuRenderer(not_null<VisualsWidget*> owner) : _owner(owner) {
+	}
+
+	std::optional<QColor> clearColor() override {
+		return QColor(0, 0, 0, 0);
+	}
+
+	void paintFallback(
+			Painter &p,
+			const QRegion &clip,
+			Ui::GL::Backend backend) override {
+		_owner->paintContent(p, clip);
+	}
+
+private:
+	const not_null<VisualsWidget*> _owner;
+
+};
+
 } // namespace
 
 VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
@@ -80,8 +111,12 @@ VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
 	sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		_scene.resize(size);
+		_seasons.resize(size, CurrentScale());
 		refreshFrameCache();
-		update();
+		if (_gpu) {
+			_gpu->rpWidget()->setGeometry(QRect(QPoint(), size));
+		}
+		requestRepaint();
 	}, lifetime());
 
 	if (_followOptions) {
@@ -135,7 +170,7 @@ VisualsWidget::VisualsWidget(QWidget *parent, bool followOptions)
 
 void VisualsWidget::setConfig(const SceneConfig &config) {
 	_scene.setConfig(config);
-	update();
+	requestRepaint();
 }
 
 void VisualsWidget::setRunning(bool running) {
@@ -213,10 +248,11 @@ void VisualsWidget::refreshFromOptions() {
 	_frameEnabled = effects && OptionValue(kOptionUiScene);
 	_trailEnabled = effects && OptionValue(kOptionCursorTrail);
 	_burstEnabled = effects && OptionValue(kOptionSendEffect);
+	_seasonsEnabled = effects && _followOptions && OptionValue(kOptionSeasons);
 	if (!_trailEnabled) {
 		_trail.clear();
 		if (!_trailDirty.isEmpty()) {
-			update(_trailDirty);
+			requestRepaint(_trailDirty);
 			_trailDirty = QRect();
 		}
 	}
@@ -226,9 +262,11 @@ void VisualsWidget::refreshFromOptions() {
 		|| _buttonsAnimated
 		|| _frameEnabled
 		|| _trailEnabled
-		|| _burstEnabled);
+		|| _burstEnabled
+		|| (effects && OptionValue(kOptionFlyby)));
+	refreshGpu();
 	wake();
-	update();
+	requestRepaint();
 }
 
 bool VisualsWidget::canAnimate() const {
@@ -251,7 +289,23 @@ void VisualsWidget::tick() {
 	auto dirty = QRegion();
 	const auto scene = sceneAllowed();
 	if (scene) {
+		// Background in time with the music: a beat is loudness above
+		// the recent average, it fades out quickly.
+		if (_followOptions && OptionValue(kOptionMusicPulse)) {
+			const auto mixer = ::Media::Player::mixer();
+			const auto level = mixer ? mixer->songLevel() : 0.;
+			_levelAverage += (level - _levelAverage) * std::min(dt * 2.5, 1.);
+			const auto beat = std::clamp((level - _levelAverage * 1.05) * 5., 0., 1.);
+			_pulse = std::max(beat, _pulse * std::exp(-dt * 7.));
+		} else {
+			_pulse = 0.;
+		}
+		_scene.setPulse(_pulse);
 		_scene.advance(dt);
+		if (_seasonsEnabled) {
+			_seasons.advance(dt);
+			dirty += _seasons.takeDirtyRegion();
+		}
 		dirty += _scene.takeDirtyRegion();
 	}
 	auto frameMoving = false;
@@ -259,19 +313,21 @@ void VisualsWidget::tick() {
 		dirty += tickButtons(dt);
 		dirty += tickTrail();
 		dirty += tickBurst(dt);
+		dirty += tickFlybys(dt);
 		const auto frame = tickFrame(dt);
 		frameMoving = !frame.isEmpty();
 		dirty += frame;
 	}
 	if (!dirty.isEmpty()) {
-		update(dirty);
+		requestRepaint(dirty);
 	}
 	if (!scene
 		&& !frameMoving
 		&& buttonsSettled()
 		&& _trail.empty()
 		&& _sparks.empty()
-		&& _shocks.empty()) {
+		&& _shocks.empty()
+		&& _flybys.empty()) {
 		_timer.cancel();
 	}
 }
@@ -351,6 +407,98 @@ QRegion VisualsWidget::tickBurst(double dt) {
 	}
 	_burstDirty = now;
 	return result;
+}
+
+void VisualsWidget::flyby(QImage userpic) {
+	if (!_running || userpic.isNull() || _flybys.size() > 4) {
+		return;
+	}
+	static auto random = std::mt19937(31337);
+	auto unit = std::uniform_real_distribution<double>(0., 1.);
+	const auto w = double(width());
+	const auto h = double(height());
+	_flybys.push_back({
+		.userpic = std::move(userpic),
+		.from = QPointF(w * (0.55 + 0.4 * unit(random)), -40.),
+		.to = QPointF(w * 0.14, h * (0.25 + 0.3 * unit(random))),
+		.arc = (unit(random) - 0.5) * h * 0.5,
+	});
+	wake();
+}
+
+QRegion VisualsWidget::tickFlybys(double dt) {
+	if (_flybys.empty() && _flybyDirty.isEmpty()) {
+		return QRegion();
+	}
+	for (auto &flyby : _flybys) {
+		flyby.progress += dt / 1.5;
+	}
+	_flybys.erase(
+		std::remove_if(_flybys.begin(), _flybys.end(), [](const Flyby &f) {
+			return f.progress >= 1.;
+		}),
+		_flybys.end());
+	auto bounds = QRect();
+	const auto scale = CurrentScale();
+	for (const auto &flyby : _flybys) {
+		const auto k = flyby.progress;
+		const auto ease = 1. - std::pow(1. - k, 3.);
+		const auto at = flyby.from + (flyby.to - flyby.from) * ease
+			+ QPointF(std::sin(k * 3.14159) * flyby.arc, 0.);
+		const auto r = int(40. * scale);
+		bounds = bounds.united(QRect(int(at.x()) - r, int(at.y()) - r, r * 2, r * 2));
+		const auto back = flyby.from + (flyby.to - flyby.from) * std::max(ease - 0.25, 0.);
+		bounds = bounds.united(QRect(int(back.x()) - r, int(back.y()) - r, r * 2, r * 2));
+	}
+	auto result = QRegion(_flybyDirty);
+	if (!bounds.isEmpty()) {
+		result += bounds;
+	}
+	_flybyDirty = bounds;
+	return result;
+}
+
+void VisualsWidget::paintFlybys(QPainter &p) const {
+	if (_flybys.empty()) {
+		return;
+	}
+	const auto scale = CurrentScale();
+	const auto accent = PaletteAt(OptionInt(kOptionPalette), 0.).first;
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setRenderHint(QPainter::SmoothPixmapTransform);
+	for (const auto &flyby : _flybys) {
+		const auto k = flyby.progress;
+		const auto ease = 1. - std::pow(1. - k, 3.);
+		const auto alpha = std::min({ k * 6., 1., (1. - k) * 4. });
+		const auto size = (18. + 10. * std::sin(k * 3.14159)) * scale;
+		// Trail of fading dots behind the userpic.
+		for (auto i = 6; i != 0; --i) {
+			const auto tk = std::max(ease - i * 0.035, 0.);
+			const auto at = flyby.from + (flyby.to - flyby.from) * tk
+				+ QPointF(std::sin(std::max(k - i * 0.035, 0.) * 3.14159) * flyby.arc, 0.);
+			auto color = accent;
+			color.setAlphaF(float(alpha * (0.5 - i * 0.07)));
+			p.setPen(Qt::NoPen);
+			p.setBrush(color);
+			p.drawEllipse(at, size * (0.5 - i * 0.05), size * (0.5 - i * 0.05));
+		}
+		const auto at = flyby.from + (flyby.to - flyby.from) * ease
+			+ QPointF(std::sin(k * 3.14159) * flyby.arc, 0.);
+		auto glow = QRadialGradient(at, size * 1.6);
+		auto c0 = accent;
+		c0.setAlphaF(float(0.6 * alpha));
+		auto c1 = accent;
+		c1.setAlphaF(0.f);
+		glow.setColorAt(0.5, c0);
+		glow.setColorAt(1., c1);
+		p.setBrush(glow);
+		p.drawEllipse(at, size * 1.6, size * 1.6);
+		p.setOpacity(alpha);
+		p.drawImage(QRectF(at - QPointF(size, size), QSizeF(size * 2., size * 2.)), flyby.userpic);
+		p.setOpacity(1.);
+	}
+	p.restore();
 }
 
 void VisualsWidget::paintBurst(QPainter &p) const {
@@ -771,16 +919,77 @@ void VisualsWidget::paintButtons(QPainter &p) const {
 	p.restore();
 }
 
+VisualsWidget::~VisualsWidget() = default;
+
+void VisualsWidget::requestRepaint() {
+	if (_gpu) {
+		_gpu->rpWidget()->update();
+	} else {
+		update();
+	}
+}
+
+void VisualsWidget::requestRepaint(const QRegion &region) {
+	if (_gpu) {
+		_gpu->rpWidget()->update();
+	} else {
+		update(region);
+	}
+}
+
+void VisualsWidget::refreshGpu() {
+	const auto want = _followOptions
+		&& _running
+		&& EffectsEnabled()
+		&& OptionValue(kOptionGpu);
+	if (!want) {
+		if (_gpu) {
+			_gpu = nullptr;
+			update();
+		}
+		return;
+	}
+	if (_gpu) {
+		return;
+	}
+	static const auto supported = Ui::GL::CheckCapabilities(nullptr).supported;
+	if (!supported) {
+		return;
+	}
+	_gpu = Ui::GL::CreateSurface(this, Ui::GL::ChosenRenderer{
+		.renderer = std::make_unique<GpuRenderer>(this),
+		.backend = Ui::GL::Backend::OpenGL,
+	});
+	const auto surface = _gpu->rpWidget();
+	surface->setAttribute(Qt::WA_TransparentForMouseEvents);
+	surface->setAttribute(Qt::WA_AlwaysStackOnTop);
+	surface->setAutoFillBackground(false);
+	surface->setGeometry(rect());
+	surface->show();
+	update();
+}
+
 void VisualsWidget::paintEvent(QPaintEvent *e) {
+	if (_gpu) {
+		return;
+	}
 	auto p = QPainter(this);
+	paintContent(p, e->region());
+}
+
+void VisualsWidget::paintContent(QPainter &p, const QRegion &clip) {
 	if (_sceneEnabled) {
-		_scene.paint(p, e->region());
+		_scene.paint(p, clip);
+		if (_seasonsEnabled) {
+			_seasons.paint(p);
+		}
 	}
 	if (_followOptions) {
 		paintFrame(p);
 		paintButtons(p);
 		paintTrail(p);
 		paintBurst(p);
+		paintFlybys(p);
 	}
 }
 
@@ -803,6 +1012,8 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 	overlay->raise();
 
 	Sounds::Setup();
+	AppIcon::Setup();
+	Lyrics::Setup(body);
 	Hidden::Setup();
 	Floating::Setup();
 	Core::App().domain().activeSessionValue(
@@ -839,6 +1050,38 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 		}
 		overlay->burst(at);
 		Sounds::Play(Sounds::Sound::Send);
+	}, overlay->lifetime());
+	Core::App().domain().activeSessionValue(
+	) | rpl::map([](Main::Session *session) {
+		return session
+			? session->data().newItemAdded()
+			: rpl::never<not_null<HistoryItem*>>();
+	}) | rpl::flatten_latest(
+	) | rpl::filter([](not_null<HistoryItem*> item) {
+		return !item->out()
+			&& EffectsEnabled()
+			&& OptionValue(kOptionFlyby)
+			&& (!OptionValue(kOptionFlybyFavorites)
+				|| item->history()->isPinnedDialog(FilterId()));
+	}) | rpl::on_next([=](not_null<HistoryItem*> item) {
+		const auto peer = item->from();
+		const auto ratio = style::DevicePixelRatio();
+		const auto size = int(48 * CurrentScale());
+		auto image = QImage(
+			QSize(size, size) * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		image.setDevicePixelRatio(ratio);
+		image.fill(Qt::transparent);
+		{
+			auto p = QPainter(&image);
+			auto view = peer->createUserpicView();
+			peer->paintUserpic(p, view, {
+				.position = QPoint(),
+				.size = size,
+				.shape = Ui::PeerUserpicShape::Circle,
+			});
+		}
+		overlay->flyby(std::move(image));
 	}, overlay->lifetime());
 }
 

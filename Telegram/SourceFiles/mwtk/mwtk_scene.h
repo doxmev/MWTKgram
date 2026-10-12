@@ -53,6 +53,8 @@ public:
 	void setConfig(const SceneConfig &config);
 	void resize(QSize size);
 	void advance(double seconds);
+	// Music beat 0..1: objects spin faster and everything glows brighter.
+	void setPulse(double pulse);
 	void paint(QPainter &p) const;
 	void paint(QPainter &p, const QRegion &clip) const;
 
@@ -120,6 +122,7 @@ private:
 	SceneConfig _config;
 	QSize _size;
 	double _time = 0.;
+	double _pulse = 0.;
 	std::mt19937 _random;
 
 	QPainterPath _textPath;

@@ -13,6 +13,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/chat/message_bubble.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/ui_utility.h"
+#include "ui/userpic_view.h"
+#include "base/call_delayed.h"
+#include "base/flat_map.h"
 #include "styles/style_dialogs.h"
 
 #include <QtGui/QLinearGradient>
@@ -21,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QRadialGradient>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
+#include <QtCore/QPointer>
 
 namespace Mwtk {
 namespace {
@@ -65,6 +69,25 @@ void ApplyChatStyle() {
 	}
 }
 
+[[nodiscard]] bool UserOnline(PeerData *peer) {
+	if (!peer) {
+		return false;
+	}
+	if (const auto user = peer->asUser()) {
+		return !user->isSelf() && !user->isBot() && Data::IsUserOnline(user);
+	}
+	return false;
+}
+
+[[nodiscard]] QColor OnlineColor() {
+	return CurrentAvatarGlow().online;
+}
+
+[[nodiscard]] base::flat_map<QPaintDevice*, QRegion> &PulseTargets() {
+	static auto result = base::flat_map<QPaintDevice*, QRegion>();
+	return result;
+}
+
 } // namespace
 
 void SetupChatStyle() {
@@ -86,7 +109,8 @@ bool PaintDialogCard(
 		QRect geometry,
 		const QColor &background,
 		bool active,
-		bool selected) {
+		bool selected,
+		PeerData *peer) {
 	const auto style = CurrentCardStyle();
 	if (!style.enabled) {
 		return false;
@@ -134,12 +158,133 @@ bool PaintDialogCard(
 	gloss.setColorAt(1., QColor(255, 255, 255, 0));
 	p.fillRect(inset, gloss);
 	p.setBrush(Qt::NoBrush);
+	const auto online = UserOnline(peer);
+	const auto glowCard = online && OptionValue(kOptionOnlineCardGlow);
 	p.setPen(QPen(
-		active ? QColor(255, 255, 255, 70) : QColor(255, 255, 255, 22),
-		1.));
+		glowCard
+			? [] { auto c = OnlineColor(); c.setAlpha(150); return c; }()
+			: active
+			? QColor(255, 255, 255, 70)
+			: QColor(255, 255, 255, 22),
+		glowCard ? 1.6 : 1.));
 	p.drawPath(path);
+	if (glowCard) {
+		auto inner = QRadialGradient(
+			QPointF(inset.left() + inset.height() * 0.6, inset.center().y()),
+			inset.width() * 0.6);
+		auto c0 = OnlineColor();
+		c0.setAlpha(46);
+		auto c1 = c0;
+		c1.setAlpha(0);
+		inner.setColorAt(0., c0);
+		inner.setColorAt(1., c1);
+		p.fillRect(inset, inner);
+	}
+	p.setClipping(false);
+	if (OptionValue(kOptionOnlineStripe)) {
+		auto color = online ? OnlineColor() : style.accent.darker(130);
+		color.setAlpha(online ? 255 : 170);
+		const auto stripe = QRectF(
+			inset.left() + 1.,
+			inset.top() + inset.height() * 0.22,
+			3. * scale,
+			inset.height() * 0.56);
+		if (online) {
+			auto halo = color;
+			halo.setAlpha(70);
+			p.setPen(Qt::NoPen);
+			p.setBrush(halo);
+			p.drawRoundedRect(stripe.adjusted(-2. * scale, -2. * scale, 2. * scale, 2. * scale), 3. * scale, 3. * scale);
+		}
+		p.setPen(Qt::NoPen);
+		p.setBrush(color);
+		p.drawRoundedRect(stripe, 1.5 * scale, 1.5 * scale);
+	}
 	p.restore();
 	return true;
+}
+
+bool OnlineDotShown() {
+	if (!EffectsEnabled()) {
+		return true;
+	}
+	return OptionValue(kOptionOnlineDot) || OptionValue(kOptionOnlinePulse);
+}
+
+void PaintOnlineExtras(
+		QPainter &p,
+		QRect userpic,
+		PeerData *peer,
+		Ui::PeerUserpicView &view,
+		const QColor &background) {
+	if (!EffectsEnabled() || !peer || userpic.isEmpty() || !UserOnline(peer)) {
+		return;
+	}
+	const auto tile = OptionValue(kOptionOnlineTile);
+	const auto pulse = OptionValue(kOptionOnlinePulse);
+	const auto dot = OptionValue(kOptionOnlineDot) || pulse;
+	if (!tile && !pulse) {
+		return;
+	}
+	const auto scale = style::Scale() / 100.;
+	const auto size = userpic.width();
+	const auto dotRadius = 5.5 * scale;
+	const auto center = QPointF(
+		userpic.x() + size - dotRadius - 1. * scale,
+		userpic.y() + size - dotRadius - 1. * scale);
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	if (tile) {
+		// Cover the round userpic and its badge with a rounded tile.
+		peer->paintUserpic(p, view, {
+			.position = userpic.topLeft(),
+			.size = size,
+			.shape = Ui::PeerUserpicShape::Forum,
+		});
+		if (dot) {
+			p.setPen(Qt::NoPen);
+			p.setBrush(background);
+			p.drawEllipse(center, dotRadius + 2. * scale, dotRadius + 2. * scale);
+			p.setBrush(OnlineColor());
+			p.drawEllipse(center, dotRadius, dotRadius);
+		}
+	}
+	if (pulse) {
+		const auto t = (crl::now() % 1800) / 1800.;
+		auto color = OnlineColor();
+		color.setAlphaF(float(0.7 * (1. - t)));
+		p.setBrush(Qt::NoBrush);
+		p.setPen(QPen(color, 2. * scale));
+		const auto r = dotRadius + 8. * scale * t;
+		p.drawEllipse(center, r, r);
+		const auto reach = int(std::ceil(dotRadius + 10. * scale));
+		const auto local = QRect(
+			int(center.x()) - reach,
+			int(center.y()) - reach,
+			reach * 2,
+			reach * 2);
+		PulseTargets()[p.device()] += p.transform().mapRect(local);
+	}
+	p.restore();
+}
+
+void SchedulePulseRepaint(not_null<QWidget*> widget) {
+	auto &targets = PulseTargets();
+	const auto i = targets.find(widget.get());
+	if (i == targets.end()) {
+		return;
+	}
+	const auto region = i->second;
+	targets.erase(i);
+	if (region.isEmpty()) {
+		return;
+	}
+	const auto weak = QPointer<QWidget>(widget.get());
+	base::call_delayed(66, widget.get(), [=] {
+		if (weak) {
+			weak->update(region);
+		}
+	});
 }
 
 void PaintAvatarRing(QPainter &p, QRect rect, PeerData *peer) {

@@ -31,6 +31,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_forum_topic.h"
 #include "data/stickers/data_custom_emoji.h"
 #include "dialogs/ui/dialogs_layout.h"
+#include "mwtk/mwtk_notify.h"
 #include "window/window_controller.h"
 #include "storage/file_download.h"
 #include "main/main_session.h"
@@ -517,7 +518,12 @@ Widget::Widget(
 		| Qt::NoDropShadowWindowHint
 		| Qt::Tool);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
-	setAttribute(Qt::WA_OpaquePaintEvent);
+	if (Mwtk::Notify::Current() != Mwtk::Notify::Style::Plain) {
+		// MWTKgram: rounded cards need a translucent window.
+		setAttribute(Qt::WA_TranslucentBackground);
+	} else {
+		setAttribute(Qt::WA_OpaquePaintEvent);
+	}
 
 	Ui::Platform::InitOnTopPanel(this);
 
@@ -698,6 +704,19 @@ Notification::Notification(
 	_userpicLoaded = !Ui::PeerUserpicLoading(_userpicView);
 	updateNotifyDisplay();
 
+	if (Mwtk::Notify::Current() == Mwtk::Notify::Style::Hologram
+		&& testAttribute(Qt::WA_TranslucentBackground)) {
+		// Two light sweeps over the hologram, then it stays still.
+		_mwtkShimmerStart = crl::now();
+		_mwtkShimmer.init([=] {
+			if (crl::now() - _mwtkShimmerStart > 2800) {
+				_mwtkShimmer.stop();
+			}
+			update();
+		});
+		_mwtkShimmer.start();
+	}
+
 	_hideTimer.setSingleShot(true);
 	connect(&_hideTimer, &QTimer::timeout, [=] { startHiding(); });
 
@@ -807,7 +826,17 @@ void Notification::paintEvent(QPaintEvent *e) {
 
 	Painter p(this);
 	p.setClipRect(e->rect());
-	p.drawImage(0, 0, _cache);
+	if (testAttribute(Qt::WA_TranslucentBackground)) {
+		p.setCompositionMode(QPainter::CompositionMode_Source);
+		p.drawImage(0, 0, _cache);
+		p.setCompositionMode(QPainter::CompositionMode_SourceOver);
+	} else {
+		p.drawImage(0, 0, _cache);
+	}
+	if (_mwtkShimmer.animating()) {
+		const auto passed = crl::now() - _mwtkShimmerStart;
+		Mwtk::Notify::PaintShimmer(p, size(), (passed % 1400) / 1400.);
+	}
 
 	auto buttonsTop = st::notifyTextTop + st::semiboldFont->height;
 	if (a_actionsOpacity.animating()) {
@@ -845,11 +874,19 @@ void Notification::repaintText() {
 	const auto adjusted = Ui::Text::AdjustCustomEmojiSize(st::emojiSize);
 	const auto skip = (adjusted - st::emojiSize + 1) / 2;
 	const auto margin = QMargins{ skip, skip, skip, skip };
-	p.fillRect(_titleRect.marginsAdded(margin), st::notificationBg);
-	p.fillRect(_textRect.marginsAdded(margin), st::notificationBg);
+	fillBackground(p, _titleRect.marginsAdded(margin));
+	fillBackground(p, _textRect.marginsAdded(margin));
 	paintTitle(p);
 	paintText(p);
 	update();
+}
+
+void Notification::fillBackground(Painter &p, QRect rect) {
+	if (testAttribute(Qt::WA_TranslucentBackground)) {
+		Mwtk::Notify::PaintBackground(p, size(), rect);
+	} else {
+		p.fillRect(rect, st::notificationBg);
+	}
 }
 
 void Notification::paintTitle(Painter &p) {
@@ -897,14 +934,19 @@ void Notification::updateNotifyDisplay() {
 		size() * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
 	img.setDevicePixelRatio(style::DevicePixelRatio());
-	img.fill(st::notificationBg->c);
+	const auto mwtk = testAttribute(Qt::WA_TranslucentBackground);
+	img.fill(mwtk ? QColor(Qt::transparent) : st::notificationBg->c);
 
 	{
 		Painter p(&img);
+		if (mwtk) {
+			Mwtk::Notify::PaintBackground(p, size());
+		} else {
 		p.fillRect(0, 0, w - st::notifyBorderWidth, st::notifyBorderWidth, st::notifyBorder);
 		p.fillRect(w - st::notifyBorderWidth, 0, st::notifyBorderWidth, h - st::notifyBorderWidth, st::notifyBorder);
 		p.fillRect(st::notifyBorderWidth, h - st::notifyBorderWidth, w - st::notifyBorderWidth, st::notifyBorderWidth, st::notifyBorder);
 		p.fillRect(0, st::notifyBorderWidth, st::notifyBorderWidth, h - st::notifyBorderWidth, st::notifyBorder);
+		}
 
 		if (!options.hideNameAndPhoto) {
 			if (_fromScheduled && _history->peer->isSelf()) {
@@ -1020,7 +1062,7 @@ void Notification::updateNotifyDisplay() {
 				: TextWithEntities{ name };
 		};
 		auto title = options.hideNameAndPhoto
-			? TextWithEntities{ u"Telegram Desktop"_q }
+			? TextWithEntities{ u"MWTKgram"_q }
 			: reminder
 			? tr::lng_notification_reminder(tr::now, tr::marked)
 			: topicWithChat();
@@ -1058,13 +1100,13 @@ void Notification::updatePeerPhoto() {
 	_userpicLoaded = true;
 
 	Painter p(&_cache);
-	p.fillRect(
+	fillBackground(
+		p,
 		style::rtlrect(
 			QRect(
 				st::notifyPhotoPos,
 				QSize(st::notifyPhotoSize, st::notifyPhotoSize)),
-			width()),
-		st::notificationBg);
+			width()));
 	_peer->paintUserpicLeft(
 		p,
 		_userpicView,

@@ -91,7 +91,6 @@ RoomController::RoomController()
 	}
 }) {
 	_night = NightEventActive();
-	_clockTimer.callEach(60 * crl::time(1000));
 	RoomConfigChanges(
 	) | rpl::on_next([=] {
 		refresh();
@@ -145,7 +144,9 @@ void RoomController::wake() {
 		return;
 	}
 	_lastTick = crl::now();
-	_timer.callEach(kTickDelay);
+	// The whole window repaints on each tick, so follow the quality preset
+	// (and the laptop mode) instead of a fixed 30 fps.
+	_timer.callEach(std::max(kTickDelay, crl::time(CurrentQuality().frameDelay)));
 }
 
 RoomController &RoomController::Instance() {
@@ -189,6 +190,14 @@ RoomParams RoomController::currentParams() const {
 }
 
 void RoomController::refresh() {
+	// Nothing ticks while MWTK effects are off.
+	if (EffectsEnabled() && OptionValue(kOptionNightEvents)) {
+		if (!_clockTimer.isActive()) {
+			_clockTimer.callEach(60 * crl::time(1000));
+		}
+	} else {
+		_clockTimer.cancel();
+	}
 	const auto value = EffectsEnabled() ? OptionInt(kOptionRoom) : 0;
 	_type = (value >= 1 && value < kBackgroundCount)
 		? RoomType(value)
@@ -198,6 +207,7 @@ void RoomController::refresh() {
 		_timer.cancel();
 		_frame = RoomFrame();
 	} else {
+		_timer.cancel();
 		wake();
 		if (!_wantedSize.isEmpty()) {
 			_renderTimer.callOnce(kParamsRenderDelay);

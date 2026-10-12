@@ -170,6 +170,10 @@ public:
 
 	TrackState currentState(AudioMsgId::Type type);
 
+	// MWTKgram: loudness (0..1) of the song right at the playback position,
+	// read from the already buffered samples. Thread: Main.
+	[[nodiscard]] float64 songLevel();
+
 	// Thread: Main. Must be locked: AudioMutex.
 	void prepareToCloseDevice();
 

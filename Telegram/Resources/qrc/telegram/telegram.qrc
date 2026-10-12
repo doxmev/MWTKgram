@@ -7,6 +7,12 @@
     <file alias="art/affiliate_logo.png">../../art/affiliate_logo.png</file>
     <file alias="art/logo_256.png">../../art/logo_256.png</file>
     <file alias="art/logo_256_no_margin.png">../../art/logo_256_no_margin.png</file>
+    <file alias="art/mwtk_icon_cube.png">../../art/mwtk_icon_cube.png</file>
+    <file alias="art/mwtk_icon_cube_nm.png">../../art/mwtk_icon_cube_nm.png</file>
+    <file alias="art/mwtk_icon_eye.png">../../art/mwtk_icon_eye.png</file>
+    <file alias="art/mwtk_icon_eye_nm.png">../../art/mwtk_icon_eye_nm.png</file>
+    <file alias="art/mwtk_icon_neon.png">../../art/mwtk_icon_neon.png</file>
+    <file alias="art/mwtk_icon_neon_nm.png">../../art/mwtk_icon_neon_nm.png</file>
     <file alias="art/themeimage.jpg">../../art/themeimage.jpg</file>
     <file alias="art/round_placeholder.jpg">../../art/round_placeholder.jpg</file>
     <file alias="art/cocoon.webp">../../art/cocoon.webp</file>

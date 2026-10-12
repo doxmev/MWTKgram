@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_row.h"
 
+#include "mwtk/mwtk_style.h"
+
 #include "ui/chat/chat_theme.h" // CountAverageColor.
 #include "ui/color_contrast.h"
 #include "ui/effects/credits_graphics.h"
@@ -472,7 +474,7 @@ void Row::updateCornerBadgeShown(
 		if (hasUnreadBadgesAbove) {
 			return kNoneLayer;
 		} else if (user
-			&& (Data::IsUserOnline(user, now)
+			&& ((Data::IsUserOnline(user, now) && Mwtk::OnlineDotShown())
 				|| (!insideCommunity && user->linkedCommunityId()))) {
 			return kTopLayer;
 		} else if (channel

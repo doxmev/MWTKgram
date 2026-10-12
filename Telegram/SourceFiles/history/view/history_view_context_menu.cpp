@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "history/view/history_view_context_menu.h"
 
+#include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_attached_stickers.h"
@@ -527,6 +528,7 @@ void AddDocumentActions(
 		menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
 			Mwtk::Playlists::ShowAddToPlaylistBox(controller, contextId);
 		}, &st::menuIconAddToFolder);
+		Mwtk::Lyrics::FillSongMenu(menu, controller);
 	}
 	AddSaveDocumentAction(menu, item, document, list);
 	AddCopyFilename(

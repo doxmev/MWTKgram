@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "lang/lang_instance.h"
 
+#include "base/flat_set.h"
+
 #include "core/application.h"
 #include "storage/serialize_common.h"
 #include "storage/localstorage.h"
@@ -804,8 +806,52 @@ QString GetNonDefaultValue(const QByteArray &key) {
 
 namespace details {
 
+namespace {
+
+// MWTKgram: strings that name the application itself say "MWTKgram".
+// Strings about the Telegram service (login codes, Premium, accounts)
+// are left as they are.
+[[nodiscard]] QString Brand(ushort key, QString value) {
+	static const auto keys = base::flat_set<ushort>{
+		tr::lng_open_from_tray.base,
+		tr::lng_quit_from_tray.base,
+		tr::lng_tray_icon_text.base,
+		tr::lng_settings_add_sendto.base,
+		tr::lng_settings_passcode_lock_app.base,
+		tr::lng_settings_use_winhello_about.base,
+		tr::lng_passcode_about.base,
+		tr::lng_passcode_about2.base,
+		tr::lng_passcode_about3.base,
+		tr::lng_passcode_winhello_unlock.base,
+		tr::lng_passcode_unlock_about.base,
+		tr::lng_local_storage_device_telegram.base,
+		tr::lng_local_storage_device_usage.base,
+		tr::lng_theme_editor_need_unlock.base,
+		tr::lng_export_progress.base,
+		tr::lng_new_version_wrap.base,
+		tr::lng_theme_no_desktop.base,
+	};
+	if (key == tr::lng_intro_about.base) {
+		const auto russian = value.contains(QChar(0x0430))
+			|| value.contains(QChar(0x043E));
+		return russian
+			? QString::fromUtf8("Добро пожаловать в MWTKgram —\n"
+				"неофициальный клиент Telegram с эффектами MWTK.")
+			: QString::fromUtf8("Welcome to MWTKgram —\n"
+				"an unofficial Telegram client with MWTK effects.");
+	}
+	if (!keys.contains(key)) {
+		return value;
+	}
+	value.replace(u"Telegram Desktop"_q, u"MWTKgram"_q);
+	value.replace(u"Telegram"_q, u"MWTKgram"_q);
+	return value;
+}
+
+} // namespace
+
 QString Current(ushort key) {
-	return GetInstance().getValue(key);
+	return Brand(key, GetInstance().getValue(key));
 }
 
 rpl::producer<QString> Value(ushort key) {

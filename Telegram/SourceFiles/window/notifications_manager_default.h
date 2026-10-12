@@ -269,12 +269,15 @@ private:
 	void paintTitle(Painter &p);
 	void paintText(Painter &p);
 	void customEmojiCallback();
+	void fillBackground(Painter &p, QRect rect);
 
 	[[nodiscard]] Notifications::Manager::NotificationId myId() const;
 
 	const not_null<PeerData*> _peer;
 
 	QImage _cache;
+	Ui::Animations::Basic _mwtkShimmer;
+	crl::time _mwtkShimmerStart = 0;
 	Ui::Text::String _titleCache;
 	Ui::Text::String _textCache;
 	QRect _titleRect;

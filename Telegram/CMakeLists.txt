@@ -2350,6 +2350,8 @@ PRIVATE
     mainwidget.h
     mainwindow.cpp
     mainwindow.h
+    mwtk/mwtk_appicon.cpp
+    mwtk/mwtk_appicon.h
     mwtk/mwtk_appear.cpp
     mwtk/mwtk_appear.h
     mwtk/mwtk_deleted.cpp
@@ -2358,6 +2360,12 @@ PRIVATE
     mwtk/mwtk_floating.h
     mwtk/mwtk_hidden.cpp
     mwtk/mwtk_hidden.h
+    mwtk/mwtk_notify.cpp
+    mwtk/mwtk_notify.h
+    mwtk/mwtk_holo.cpp
+    mwtk/mwtk_holo.h
+    mwtk/mwtk_lyrics.cpp
+    mwtk/mwtk_lyrics.h
     mwtk/mwtk_notes.cpp
     mwtk/mwtk_notes.h
     mwtk/mwtk_options.cpp
@@ -2372,6 +2380,8 @@ PRIVATE
     mwtk/mwtk_scene.h
     mwtk/mwtk_playlists.cpp
     mwtk/mwtk_playlists.h
+    mwtk/mwtk_seasons.cpp
+    mwtk/mwtk_seasons.h
     mwtk/mwtk_sounds.cpp
     mwtk/mwtk_sounds.h
     mwtk/mwtk_style.cpp

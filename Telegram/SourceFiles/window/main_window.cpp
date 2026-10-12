@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/main_window.h"
 
+#include "mwtk/mwtk_options.h"
+
 #include "api/api_updates.h"
 #include "storage/localstorage.h"
 #include "platform/platform_specific.h"
@@ -139,14 +141,45 @@ base::options::toggle OptionDisableTouchbar({
 const char kOptionNewWindowsSizeAsFirst[] = "new-windows-size-as-first";
 const char kOptionDisableTouchbar[] = "touchbar-disabled";
 
-const QImage &Logo() {
-	static const auto result = QImage(u":/gui/art/logo_256.png"_q);
+namespace {
+
+// MWTKgram: the application icon can be switched in the settings.
+[[nodiscard]] const QImage &MwtkLogo(bool margin) {
+	static const auto names = std::array<const char*, 4>{
+		nullptr,
+		"cube",
+		"eye",
+		"neon",
+	};
+	static auto cache = std::array<QImage, 8>();
+	const auto index = std::clamp(
+		Mwtk::OptionInt(Mwtk::kOptionAppIcon),
+		0,
+		int(names.size()) - 1);
+	auto &result = cache[index * 2 + (margin ? 0 : 1)];
+	if (result.isNull()) {
+		result = !index
+			? QImage(margin
+				? u":/gui/art/logo_256.png"_q
+				: u":/gui/art/logo_256_no_margin.png"_q)
+			: QImage(u":/gui/art/mwtk_icon_"_q
+				+ QString::fromLatin1(names[index])
+				+ (margin ? u".png"_q : u"_nm.png"_q));
+		if (result.isNull()) {
+			result = QImage(u":/gui/art/logo_256.png"_q);
+		}
+	}
 	return result;
 }
 
+} // namespace
+
+const QImage &Logo() {
+	return MwtkLogo(true);
+}
+
 const QImage &LogoNoMargin() {
-	static const auto result = QImage(u":/gui/art/logo_256_no_margin.png"_q);
-	return result;
+	return MwtkLogo(false);
 }
 
 void ConvertIconToBlack(QImage &image) {

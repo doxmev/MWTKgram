@@ -55,6 +55,29 @@ extern const char kOptionCustomColor[];
 extern const char kOptionNightEvents[];
 extern const char kOptionSaveDeleted[];
 extern const char kOptionKeepDeletedInChat[];
+extern const char kOptionGpu[];
+extern const char kOptionLaptopMode[];
+extern const char kOptionAppIcon[];
+extern const char kOptionNotifyStyle[];
+extern const char kOptionOnlineStripe[];
+extern const char kOptionOnlineCardGlow[];
+extern const char kOptionOnlinePulse[];
+extern const char kOptionOnlineTile[];
+extern const char kOptionOnlineDot[];
+extern const char kOptionLyrics[];
+extern const char kOptionLyricsOnline[];
+extern const char kOptionLyricsLayout[];
+extern const char kOptionLyricsVanish[];
+extern const char kOptionLyricsStyle[];
+extern const char kOptionLyricsMotion[];
+extern const char kOptionLyricsSize[];
+extern const char kOptionHideChats[];
+extern const char kOptionMusicPulse[];
+extern const char kOptionSeasons[];
+extern const char kOptionFlyby[];
+extern const char kOptionFlybyFavorites[];
+extern const char kOptionHoloProfile[];
+extern const char kOptionQuickPhrases[];
 
 inline constexpr auto kCustomPaletteIndex = 7;
 
@@ -99,6 +122,10 @@ struct Quality {
 [[nodiscard]] QString QualityName(int index);
 [[nodiscard]] Quality CurrentQuality();
 
+// Laptop mode: on battery power the low preset is used.
+[[nodiscard]] bool LaptopSavingActive();
+[[nodiscard]] rpl::producer<> LaptopSavingChanges();
+
 [[nodiscard]] QString IntensityName(int index);
 [[nodiscard]] double IntensityOpacity(int index);
 
@@ -124,5 +151,6 @@ struct CardStyle {
 [[nodiscard]] bool OptionValue(const char id[]);
 [[nodiscard]] int OptionInt(const char id[]);
 [[nodiscard]] QString OptionString(const char id[]);
+[[nodiscard]] rpl::producer<> OptionChanges(const char id[]);
 
 } // namespace Mwtk

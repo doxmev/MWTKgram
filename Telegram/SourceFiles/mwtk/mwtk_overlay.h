@@ -8,19 +8,30 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/timer.h"
 #include "mwtk/mwtk_scene.h"
+#include "mwtk/mwtk_seasons.h"
 #include "ui/rp_widget.h"
 
 #include <QtCore/QPointer>
+
+namespace Ui {
+class RpWidgetWrap;
+} // namespace Ui
 
 namespace Mwtk {
 
 class VisualsWidget final : public Ui::RpWidget {
 public:
 	VisualsWidget(QWidget *parent, bool followOptions);
+	~VisualsWidget();
 
 	void setConfig(const SceneConfig &config);
 	void setRunning(bool running);
 	void burst(QPointF at);
+	// A glowing userpic flies over the background to the chat list.
+	void flyby(QImage userpic);
+
+	// Draws everything; used both by paintEvent() and the GPU surface.
+	void paintContent(QPainter &p, const QRegion &clip);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
@@ -58,8 +69,13 @@ private:
 	void pushTrailPoint();
 	[[nodiscard]] QRegion tickTrail();
 	void refreshFrameCache();
+	void refreshGpu();
+	void requestRepaint();
+	void requestRepaint(const QRegion &region);
 
 	Scene _scene;
+	Seasons _seasons;
+	bool _seasonsEnabled = false;
 	base::Timer _timer;
 	crl::time _lastTick = 0;
 	bool _running = false;
@@ -98,11 +114,27 @@ private:
 	std::vector<Shock> _shocks;
 	QRect _burstDirty;
 
+	struct Flyby {
+		QImage userpic;
+		QPointF from;
+		QPointF to;
+		double progress = 0.;
+		double arc = 0.;
+	};
+	std::vector<Flyby> _flybys;
+	QRect _flybyDirty;
+	[[nodiscard]] QRegion tickFlybys(double dt);
+	void paintFlybys(QPainter &p) const;
+
 	QImage _branch;
 	QSize _branchFor;
 	QPointF _frameShift;
 	double _frameTime = 0.;
+	double _levelAverage = 0.;
+	double _pulse = 0.;
 	std::vector<QRect> _frameRects;
+
+	std::unique_ptr<Ui::RpWidgetWrap> _gpu;
 
 };
 

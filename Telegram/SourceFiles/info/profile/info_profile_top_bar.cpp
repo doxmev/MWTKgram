@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_top_bar.h"
 
+#include "mwtk/mwtk_holo.h"
+
 #include "api/api_peer_colors.h"
 #include "api/api_peer_photo.h"
 #include "api/api_user_privacy.h"
@@ -522,6 +524,9 @@ TopBar::TopBar(
 	setupButtons(controller, descriptor.source);
 	setupSwipeBack(controller);
 	setupUserpicButton(controller);
+	if (_userpicButton) {
+		Mwtk::Holo::Attach(_userpicButton.get());
+	}
 	if (_hasActions) {
 		_peer->session().changes().peerFlagsValue(
 			_peer,

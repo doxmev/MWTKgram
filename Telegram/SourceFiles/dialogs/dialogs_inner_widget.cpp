@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "dialogs/dialogs_inner_widget.h"
 
+#include "mwtk/mwtk_style.h"
+
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
 
@@ -1036,6 +1038,9 @@ void InnerWidget::showSavedSublists() {
 
 void InnerWidget::paintEvent(QPaintEvent *e) {
 	Painter p(this);
+	const auto mwtkPulse = gsl::finally([&] {
+		Mwtk::SchedulePulseRepaint(this);
+	});
 
 	p.setInactive(
 		_controller->isGifPausedAtLeastFor(Window::GifPauseReason::Any));

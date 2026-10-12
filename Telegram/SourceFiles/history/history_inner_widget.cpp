@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mwtk/mwtk_appear.h"
 #include "mwtk/mwtk_deleted.h"
+#include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_playlists.h"
 
 #include "api/api_polls.h"
@@ -3146,6 +3147,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			_menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
 				Mwtk::Playlists::ShowAddToPlaylistBox(controller, itemId);
 			}, &st::menuIconAddToFolder);
+			Mwtk::Lyrics::FillSongMenu(_menu.get(), controller);
 		}
 		if (!document->filepath(true).isEmpty()) {
 			_menu->addAction(Platform::IsMac() ? tr::lng_context_show_in_finder(tr::now) : tr::lng_context_show_in_folder(tr::now), [=] {

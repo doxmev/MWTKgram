@@ -449,16 +449,21 @@ QRect Scene::bodyRect(const Body &body) const {
 	return QRect();
 }
 
+void Scene::setPulse(double pulse) {
+	_pulse = Clamp(pulse, 0., 1.);
+}
+
 void Scene::advance(double seconds) {
 	const auto dt = Clamp(seconds, 0., 0.1);
 	_time += dt;
+	const auto spin = 1. + 2.5 * _pulse;
 	const auto f = std::max(1., focal());
 	for (auto &body : _bodies) {
 		body.x += body.vx * dt;
 		body.y += body.vy * dt;
 		body.z += body.vz * dt;
 		for (auto k = 0; k != 3; ++k) {
-			body.angles[k] += body.speeds[k] * dt;
+			body.angles[k] += body.speeds[k] * dt * spin;
 		}
 		const auto limitX = (_size.width() / 2.) * body.z / f * 1.35 + 0.2;
 		const auto limitY = (_size.height() / 2.) * body.z / f * 1.35 + 0.2;
@@ -539,7 +544,9 @@ void Scene::paint(QPainter &p, const QRegion &clip) const {
 		if (projected.alpha <= 0.003) {
 			continue;
 		}
-		p.setOpacity(_config.opacity * projected.alpha);
+		p.setOpacity(std::min(
+			_config.opacity * projected.alpha * (1. + 0.7 * _pulse),
+			1.));
 		switch (body->kind) {
 		case Kind::Label: paintLabel(p, *body, projected, palette); break;
 		case Kind::Object: paintObject(p, *body, projected, palette); break;

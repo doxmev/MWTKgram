@@ -491,7 +491,8 @@ void PaintRow(
 			geometry,
 			QBrush(context.currentBg).color(),
 			context.active,
-			context.selected)) {
+			context.selected,
+			from)) {
 		p.fillRect(geometry, bg);
 	}
 	if (!(flags & Flag::TopicJumpRipple)) {
@@ -556,6 +557,24 @@ void PaintRow(
 				&& !draft
 				&& item
 				&& !item->isEmpty()));
+	}
+	if (from
+		&& (flags & Flag::AllowUserOnline)
+		&& !(flags & (Flag::SavedMessages | Flag::RepliesMessages | Flag::MyNotes | Flag::HiddenAuthor))) {
+		Mwtk::PaintOnlineExtras(
+			p,
+			QRect(
+				context.st->padding.left(),
+				context.st->padding.top(),
+				context.st->photoSize,
+				context.st->photoSize),
+			from,
+			row->userpicView(),
+			(context.active
+				? st::dialogsBgActive->c
+				: context.selected
+				? st::dialogsBgOver->c
+				: st::dialogsBg->c));
 	}
 	if (from && !(flags & (Flag::SavedMessages | Flag::RepliesMessages | Flag::MyNotes | Flag::HiddenAuthor))) {
 		Mwtk::PaintAvatarRing(

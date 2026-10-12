@@ -22,6 +22,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "ui/chat/attach/attach_prepare.h"
 
+#include <cmath>
+
 #include <al.h>
 #include <alc.h>
 
@@ -1036,6 +1038,58 @@ TrackState Mixer::currentState(AudioMsgId::Type type) {
 		return TrackState();
 	}
 	return current->state;
+}
+
+float64 Mixer::songLevel() {
+	QMutexLocker lock(&AudioMutex);
+	const auto track = trackForType(AudioMsgId::Type::Song);
+	if (!track || track->state.state != State::Playing) {
+		return 0.;
+	}
+	const auto bytesPerFrame = [&] {
+		switch (track->format) {
+		case AL_FORMAT_MONO8: return 1;
+		case AL_FORMAT_MONO16: return 2;
+		case AL_FORMAT_STEREO8: return 2;
+		case AL_FORMAT_STEREO16: return 4;
+		}
+		return 0;
+	}();
+	if (bytesPerFrame != 2 && bytesPerFrame != 4) {
+		return 0.;
+	}
+	const auto &withSpeed = track->withSpeed;
+	auto offset = withSpeed.position - withSpeed.bufferedPosition;
+	if (offset < 0) {
+		return 0.;
+	}
+	for (auto i = 0; i != Track::kBuffersCount; ++i) {
+		const auto frames = int64(withSpeed.samples[i]);
+		if (!frames) {
+			break;
+		} else if (offset >= frames) {
+			offset -= frames;
+			continue;
+		}
+		const auto &bytes = withSpeed.buffered[i];
+		const auto available = std::min(
+			frames - offset,
+			int64(bytes.size() / bytesPerFrame) - offset);
+		const auto count = std::min(available, int64(1024));
+		if (count <= 0) {
+			return 0.;
+		}
+		const auto data = reinterpret_cast<const int16*>(
+			bytes.constData() + offset * bytesPerFrame);
+		const auto values = count * (bytesPerFrame / 2);
+		auto sum = 0.;
+		for (auto j = 0; j != values; ++j) {
+			const auto v = data[j] / 32768.;
+			sum += v * v;
+		}
+		return std::clamp(std::sqrt(sum / values) * 2.2, 0., 1.);
+	}
+	return 0.;
 }
 
 void Mixer::setStoppedState(Track *current, State state) {
