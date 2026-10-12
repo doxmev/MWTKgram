@@ -5,6 +5,7 @@ on:
     branches:
       - dev
       - android
+      - check
     paths:
       - 'android/**'
       - '.github/workflows/mwtkgram-android.yml'
