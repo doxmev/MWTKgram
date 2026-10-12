@@ -50,13 +50,15 @@ public final class MwtkDialogs {
             return;
         }
         final int[] palette = MwtkConfig.palette();
-        if (cardHeight != height || cardPreset != MwtkConfig.preset) {
+        final int listAlpha = MwtkConfig.num(MwtkConfig.LIST_ALPHA, 100);
+        final int cardKey = MwtkConfig.preset * 7919 + MwtkConfig.accent() + listAlpha;
+        if (cardHeight != height || cardPreset != cardKey) {
             cardHeight = height;
-            cardPreset = MwtkConfig.preset;
-            final int accent = palette[2];
+            cardPreset = cardKey;
+            final int accent = MwtkConfig.accent();
             cardPaint.setShader(new LinearGradient(0, 0, 0, height,
-                Color.argb(92, Color.red(accent), Color.green(accent), Color.blue(accent)),
-                Color.argb(70, Color.red(accent) / 2, Color.green(accent) / 2, Color.blue(accent) / 2),
+                Color.argb(92 * listAlpha / 100, Color.red(accent), Color.green(accent), Color.blue(accent)),
+                Color.argb(70 * listAlpha / 100, Color.red(accent) / 2, Color.green(accent) / 2, Color.blue(accent) / 2),
                 Shader.TileMode.CLAMP));
         }
         final float inset = AndroidUtilities.dp(8);
@@ -91,18 +93,35 @@ public final class MwtkDialogs {
         }
     }
 
+    private static RadialGradient haloOnline;
+    private static RadialGradient haloOffline;
+    private static float haloRadius;
+    private static int haloAccent;
+
     /** Soft halo behind the avatar, not a ring (rings look like stories). */
     public static void drawHalo(Canvas canvas, RectF avatar, boolean online, boolean regular) {
         if (!regular || !active() || !MwtkConfig.glow || avatar == null || avatar.width() <= 0) {
             return;
         }
-        final float cx = avatar.centerX();
-        final float cy = avatar.centerY();
         final float r = avatar.width() / 2f;
         final float outer = r * 1.38f;
-        final int color = online ? ONLINE : MwtkConfig.palette()[2];
-        final int alpha = online ? 120 : 70;
-        haloPaint.setShader(new RadialGradient(cx, cy, outer,
+        final int accent = MwtkConfig.accent();
+        // The gradients are made once and reused, they are expensive.
+        if (haloRadius != outer || haloAccent != accent || haloOnline == null) {
+            haloRadius = outer;
+            haloAccent = accent;
+            haloOnline = halo(ONLINE, 120, r, outer);
+            haloOffline = halo(accent, 70, r, outer);
+        }
+        haloPaint.setShader(online ? haloOnline : haloOffline);
+        canvas.save();
+        canvas.translate(avatar.centerX(), avatar.centerY());
+        canvas.drawCircle(0, 0, outer, haloPaint);
+        canvas.restore();
+    }
+
+    private static RadialGradient halo(int color, int alpha, float r, float outer) {
+        return new RadialGradient(0, 0, outer,
             new int[] {
                 Color.argb(0, Color.red(color), Color.green(color), Color.blue(color)),
                 Color.argb(0, Color.red(color), Color.green(color), Color.blue(color)),
@@ -110,8 +129,7 @@ public final class MwtkDialogs {
                 Color.argb(0, Color.red(color), Color.green(color), Color.blue(color)),
             },
             new float[] { 0f, Math.max(0f, r / outer - 0.04f), r / outer, 1f },
-            Shader.TileMode.CLAMP));
-        canvas.drawCircle(cx, cy, outer, haloPaint);
+            Shader.TileMode.CLAMP);
     }
 
     /** Avatar corner radius: a rounded tile for online users when enabled. */

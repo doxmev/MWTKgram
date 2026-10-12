@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 
 import org.telegram.messenger.ApplicationLoader;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /** MWTKgram settings, kept in their own preferences file. */
@@ -143,6 +144,94 @@ public final class MwtkConfig {
         loaded = false;
         load();
         changed();
+    }
+
+    // Generic options for the newer features, cached in memory.
+    private static final ConcurrentHashMap<String, Object> cache = new ConcurrentHashMap<>();
+
+    public static final String APP_ALPHA = "app_alpha";
+    public static final String LIST_ALPHA = "list_alpha";
+    public static final String APP_ICON = "app_icon";
+    public static final String NOTIFY_STYLE = "notify_style";
+    public static final String SCENE = "scene";
+    public static final String SEASONS = "seasons";
+    public static final String MUSIC_PULSE = "music_pulse";
+    public static final String LYRICS = "lyrics";
+    public static final String LYRICS_ONLINE = "lyrics_online";
+    public static final String LYRICS_LAYOUT = "lyrics_layout";
+    public static final String LYRICS_VANISH = "lyrics_vanish";
+    public static final String LYRICS_STYLE = "lyrics_style";
+    public static final String LYRICS_MOTION = "lyrics_motion";
+    public static final String LYRICS_SIZE = "lyrics_size";
+    public static final String HIDE_CHATS = "hide_chats";
+    public static final String FLYBY = "flyby";
+    public static final String HOLO = "holo";
+    public static final String SOUNDS = "sounds";
+    public static final String APPEAR = "appear";
+    public static final String SEND_SPARKS = "send_sparks";
+    public static final String NIGHT = "night";
+    public static final String KEEP_DELETED = "keep_deleted";
+    public static final String PHRASES = "phrases";
+    public static final String CUSTOM_COLOR = "custom_color";
+    public static final String RESPECT_ANIMATIONS = "respect_animations";
+
+    public static boolean flag(String key, boolean def) {
+        Object value = cache.get(key);
+        if (value instanceof Boolean) {
+            return (Boolean) value;
+        }
+        boolean result = prefs().getBoolean(key, def);
+        cache.put(key, result);
+        return result;
+    }
+
+    public static int num(String key, int def) {
+        Object value = cache.get(key);
+        if (value instanceof Integer) {
+            return (Integer) value;
+        }
+        int result = prefs().getInt(key, def);
+        cache.put(key, result);
+        return result;
+    }
+
+    public static void setFlag(String key, boolean value) {
+        prefs().edit().putBoolean(key, value).apply();
+        cache.put(key, value);
+        changed();
+    }
+
+    public static void setNum(String key, int value) {
+        prefs().edit().putInt(key, value).apply();
+        cache.put(key, value);
+        changed();
+    }
+
+    /** Effects are on and the system did not ask to remove animations. */
+    public static boolean animate() {
+        load();
+        if (!effects) {
+            return false;
+        }
+        if (flag(RESPECT_ANIMATIONS, true)) {
+            try {
+                float scale = android.provider.Settings.Global.getFloat(
+                    ApplicationLoader.applicationContext.getContentResolver(),
+                    android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                    1f);
+                if (scale == 0f) {
+                    return false;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        return true;
+    }
+
+    /** Accent color: the preset's or the custom one. */
+    public static int accent() {
+        int custom = num(CUSTOM_COLOR, 0);
+        return custom != 0 ? custom : palette()[2];
     }
 
     public static void toggleEffects() {

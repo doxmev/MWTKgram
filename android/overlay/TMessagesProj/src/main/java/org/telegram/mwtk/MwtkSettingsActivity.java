@@ -12,6 +12,7 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Cells.HeaderCell;
@@ -26,6 +27,12 @@ public class MwtkSettingsActivity extends BaseFragment {
 
     private static final String[] PRESETS = { "Кровь", "Синтвейв", "Космос", "Эконом" };
     private static final String[] STYLES = { "Неон", "Стекло", "Пиксели", "Комикс" };
+    private static final String[] NOTIFY = { "Как в Telegram", "Голограмма", "Неоновая карточка", "3D-блок" };
+    private static final String[] LAYOUTS = { "По словам", "Лесенка", "Строкой" };
+    private static final String[] VANISH = { "Искры", "Растворение", "Улетает вверх" };
+    private static final String[] TEXT_STYLES = { "Неон", "3D", "Пиксели" };
+    private static final String[] COLORS = { "Как в теме", "Красный", "Розовый", "Фиолетовый", "Синий", "Бирюзовый", "Зелёный", "Жёлтый", "Белый" };
+    private static final int[] COLOR_VALUES = { 0, 0xffe0141e, 0xffff2fa6, 0xff9b4dff, 0xff1f8bff, 0xff00d4c8, 0xff39ff88, 0xffffcc33, 0xffeeeeee };
 
     private LinearLayout list;
 
@@ -68,19 +75,36 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "Все эффекты MWTKgram", "Можно встряхнуть телефон, чтобы выключить", MwtkConfig.EFFECTS);
         cycle(context, "Тема", PRESETS, MwtkConfig.PRESET, true);
         cycle(context, "Стиль рисовки", STYLES, MwtkConfig.STYLE, false);
+        flagCycle(context, "Свой цвет", COLORS, MwtkConfig.CUSTOM_COLOR, 0, COLOR_VALUES);
+        flagCycle(context, "Иконка приложения", MwtkIcons.NAMES, MwtkConfig.APP_ICON, 0, null);
+        flagCycle(context, "Уведомления в приложении", NOTIFY, MwtkConfig.NOTIFY_STYLE, 1, null);
+        flag(context, "Звуки интерфейса", "Мягкий звук при отправке", MwtkConfig.SOUNDS, true);
+        flag(context, "Искры при отправке", "Вспышка у кнопки отправки", MwtkConfig.SEND_SPARKS, true);
+        flag(context, "Учитывать «Убрать анимации»", "Если в системе выключены анимации, эффекты замирают", MwtkConfig.RESPECT_ANIMATIONS, true);
         shadow(context);
 
         header(context, "Фон");
-        toggle(context, "Плывущие надписи", "doxmev и MWTK на фоне списка чатов", MwtkConfig.LABELS);
+        flagCycle(context, "3D-сцена", MwtkBackgroundDrawable.SCENES, MwtkConfig.SCENE, 0, null);
+        toggle(context, "Плывущие надписи", "doxmev и MWTK на фоне", MwtkConfig.LABELS);
         toggle(context, "3D-фигуры", "Вращающиеся каркасные кубы", MwtkConfig.FIGURES);
+        flag(context, "Времена года", "Снег зимой, листья осенью, лепестки весной", MwtkConfig.SEASONS, true);
+        flag(context, "Фон в такт музыке", "Нужен доступ к микрофону (как для голосовых)", MwtkConfig.MUSIC_PULSE, true);
+        flag(context, "Секреты в 3 часа ночи", "Красная луна и глаза в лесу", MwtkConfig.NIGHT, true);
         toggle(context, "Фон следует за наклоном", "Гироскоп двигает надписи и фигуры", MwtkConfig.TILT);
-        toggle(context, "Беречь батарею", "Анимации на паузе в режиме энергосбережения и ниже 20%", MwtkConfig.BATTERY);
+        toggle(context, "Беречь батарею", "Пауза в энергосбережении, ниже 20% и при перегреве", MwtkConfig.BATTERY);
+        shadow(context);
+
+        header(context, "Прозрачность");
+        numSlider(context, "Список чатов", MwtkConfig.LIST_ALPHA, 100, 10, 100, "%");
+        numSlider(context, "Всё приложение", MwtkConfig.APP_ALPHA, 100, 15, 100, "%");
         shadow(context);
 
         header(context, "Список чатов");
         toggle(context, "Объёмные карточки чатов", "Полупрозрачные скруглённые карточки", MwtkConfig.CARDS);
         slider(context, "Скругление карточек", MwtkConfig.RADIUS, 0, 28, " dp");
-        shadow(context);
+        TextInfoPrivacyCell floatingInfo = new TextInfoPrivacyCell(context);
+        floatingInfo.setText("Летающие чаты: долгое нажатие на заголовок «MWTKgram» над списком. Наклоняй телефон и бросай кружки пальцем.");
+        list.addView(floatingInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         header(context, "Кто в сети");
         toggle(context, "Свечение аватарки", "Мягкий ореол вокруг", MwtkConfig.GLOW);
@@ -89,7 +113,44 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "Точка", "Зелёная точка у аватарки", MwtkConfig.DOT);
         toggle(context, "Пульсирующая точка", "Медленно «дышит»", MwtkConfig.PULSE);
         toggle(context, "Аватарка-плитка", "Квадрат со скруглёнными углами", MwtkConfig.TILE);
+        flag(context, "Пролёт аватарки", "Новое сообщение пролетает над списком", MwtkConfig.FLYBY, true);
+        flag(context, "Голографический профиль", "Перелив и развёртка на фото профиля", MwtkConfig.HOLO, true);
         shadow(context);
+
+        header(context, "Музыка");
+        action(context, "Мои плейлисты", () -> MwtkPlaylists.showListBox(this));
+        flag(context, "Летающий текст песни", "Слова вылетают и загораются в такт", MwtkConfig.LYRICS, true);
+        flag(context, "Искать текст в интернете", "База LRCLIB", MwtkConfig.LYRICS_ONLINE, true);
+        flag(context, "Спрятать чаты, пока играет текст", "Текст на весь экран, нажми — и чаты вернутся", MwtkConfig.HIDE_CHATS, false);
+        flagCycle(context, "Расположение слов", LAYOUTS, MwtkConfig.LYRICS_LAYOUT, 0, null);
+        flagCycle(context, "Как пропадают слова", VANISH, MwtkConfig.LYRICS_VANISH, 0, null);
+        flagCycle(context, "Стиль текста", TEXT_STYLES, MwtkConfig.LYRICS_STYLE, 0, null);
+        numSlider(context, "Движение слов", MwtkConfig.LYRICS_MOTION, 60, 0, 100, "%");
+        numSlider(context, "Размер текста", MwtkConfig.LYRICS_SIZE, 100, 60, 140, "%");
+        TextInfoPrivacyCell musicInfo = new TextInfoPrivacyCell(context);
+        musicInfo.setText("Долгое нажатие на трек в чате: «В плейлист MWTK», «Спрятать чаты», «Синхронизировать текст» и «Сдвиг текста».");
+        list.addView(musicInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        header(context, "Чаты и приватность");
+        action(context, MwtkHidden.unlocked() ? "Закрыть скрытые чаты" : "Скрытые чаты", () -> {
+            MwtkHidden.open(this);
+            AndroidUtilities.runOnUIThread(this::rebuild, 400);
+        });
+        action(context, "Пароль скрытых чатов", () -> MwtkHidden.changePassword(this));
+        flag(context, "Вход по отпечатку", "Для скрытых чатов", "hidden_fingerprint", true);
+        flag(context, "Удалённые остаются в чате", "С красной пометкой «удалено»", MwtkConfig.KEEP_DELETED, true);
+        flag(context, "Быстрые фразы через «/»", "Набери «/» в поле сообщения", MwtkConfig.PHRASES, true);
+        action(context, "Мои быстрые фразы", () -> MwtkPhrases.edit(this));
+        TextInfoPrivacyCell chatInfo = new TextInfoPrivacyCell(context);
+        chatInfo.setText("В меню чата (⋮): «Скрыть чат», «Своё название», «Заметка» и «Удалённые сообщения». У сообщения: «Напомнить».");
+        list.addView(chatInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+
+        header(context, "Синхронизация и темы");
+        action(context, "Поделиться темой MWTK", () -> MwtkShare.exportTheme(getParentActivity()));
+        action(context, "Отправить настройки на компьютер", () -> MwtkShare.exportSync(getParentActivity()));
+        TextInfoPrivacyCell syncInfo = new TextInfoPrivacyCell(context);
+        syncInfo.setText("Файл с компьютера (.mwtk) или тему (.mwtktheme) достаточно открыть в чате — MWTKgram предложит загрузить.");
+        list.addView(syncInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         header(context, "Встряхивание и вибрация");
         toggle(context, "Встряхнуть — выключить эффекты", "Ещё раз встряхнуть — включить", MwtkConfig.SHAKE);
@@ -112,6 +173,14 @@ public class MwtkSettingsActivity extends BaseFragment {
         list.addView(new ShadowSectionCell(context), LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
     }
 
+    private void action(Context context, String title, Runnable callback) {
+        TextSettingsCell cell = new TextSettingsCell(context);
+        cell.setText(title, true);
+        cell.setBackground(Theme.getSelectorDrawable(true));
+        cell.setOnClickListener(v -> callback.run());
+        list.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
     private void toggle(Context context, String title, String hint, String key) {
         TextCheckCell cell = new TextCheckCell(context);
         cell.setTextAndValueAndCheck(title, hint, MwtkConfig.getBool(key), true, true);
@@ -125,6 +194,22 @@ public class MwtkSettingsActivity extends BaseFragment {
                 MwtkMotion.get().pause();
                 MwtkMotion.get().resume();
             }
+            if (MwtkConfig.EFFECTS.equals(key)) {
+                MwtkTheme.refresh();
+            }
+        });
+        list.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
+    private void flag(Context context, String title, String hint, String key, boolean def) {
+        TextCheckCell cell = new TextCheckCell(context);
+        cell.setTextAndValueAndCheck(title, hint, MwtkConfig.flag(key, def), true, true);
+        cell.setBackground(Theme.getSelectorDrawable(true));
+        cell.setOnClickListener(v -> {
+            boolean value = !MwtkConfig.flag(key, def);
+            MwtkConfig.setFlag(key, value);
+            cell.setChecked(value);
+            MwtkMotion.vibrate(15);
         });
         list.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
     }
@@ -149,7 +234,65 @@ public class MwtkSettingsActivity extends BaseFragment {
         list.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
     }
 
+    /** A choice from a list; values may map indexes to stored numbers. */
+    private void flagCycle(Context context, String title, String[] names, String key, int def, int[] values) {
+        TextSettingsCell cell = new TextSettingsCell(context);
+        int stored = MwtkConfig.num(key, values != null ? values[def] : def);
+        int index = 0;
+        if (values != null) {
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] == stored) {
+                    index = i;
+                }
+            }
+        } else {
+            index = Math.max(0, Math.min(names.length - 1, stored));
+        }
+        cell.setTextAndValue(title, names[index], true);
+        cell.setBackground(Theme.getSelectorDrawable(true));
+        cell.setOnClickListener(v -> {
+            AlertDialog.Builder builder = new AlertDialog.Builder(context);
+            builder.setTitle(title);
+            builder.setItems(names, (dialog, which) -> {
+                MwtkConfig.setNum(key, values != null ? values[which] : which);
+                if (MwtkConfig.APP_ICON.equals(key)) {
+                    MwtkIcons.apply(which);
+                }
+                MwtkMotion.vibrate(15);
+                cell.setTextAndValue(title, names[which], true, true);
+            });
+            showDialog(builder.create());
+        });
+        list.addView(cell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
+    private interface IntGetter {
+        int get();
+    }
+
+    private interface IntSetter {
+        void set(int value);
+    }
+
     private void slider(Context context, String title, String key, int min, int max, String suffix) {
+        addSlider(context, title, min, max, suffix, () -> MwtkConfig.getInt(key), value -> {
+            MwtkConfig.setInt(key, value);
+            if (MwtkConfig.VIBRATION.equals(key)) {
+                MwtkMotion.vibrate(40);
+            }
+        });
+    }
+
+    private void numSlider(Context context, String title, String key, int def, int min, int max, String suffix) {
+        addSlider(context, title, min, max, suffix, () -> MwtkConfig.num(key, def), value -> {
+            MwtkConfig.setNum(key, value);
+            if (MwtkConfig.APP_ALPHA.equals(key)) {
+                MwtkTheme.refresh();
+            }
+        });
+    }
+
+    private void addSlider(Context context, String title, int min, int max, String suffix, IntGetter getter, IntSetter setter) {
         LinearLayout box = new LinearLayout(context);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
@@ -158,7 +301,7 @@ public class MwtkSettingsActivity extends BaseFragment {
         TextView label = new TextView(context);
         label.setTextSize(16);
         label.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        int value = MwtkConfig.getInt(key);
+        int value = getter.get();
         label.setText(title + ": " + value + suffix);
         box.addView(label, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -166,7 +309,7 @@ public class MwtkSettingsActivity extends BaseFragment {
         seek.setMax(max - min);
         seek.setProgress(value - min);
         if (Build.VERSION.SDK_INT >= 21) {
-            int accent = MwtkConfig.palette()[2];
+            int accent = MwtkConfig.accent();
             seek.setProgressTintList(ColorStateList.valueOf(accent));
             seek.setThumbTintList(ColorStateList.valueOf(accent));
         }
@@ -182,10 +325,7 @@ public class MwtkSettingsActivity extends BaseFragment {
 
             @Override
             public void onStopTrackingTouch(SeekBar bar) {
-                MwtkConfig.setInt(key, bar.getProgress() + min);
-                if (MwtkConfig.VIBRATION.equals(key)) {
-                    MwtkMotion.vibrate(40);
-                }
+                setter.set(bar.getProgress() + min);
             }
         });
         box.addView(seek, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 40));

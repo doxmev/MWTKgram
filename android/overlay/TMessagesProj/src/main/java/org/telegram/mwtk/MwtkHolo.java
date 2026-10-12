@@ -1,0 +1,99 @@
+package org.telegram.mwtk;
+
+import android.annotation.SuppressLint;
+import android.content.Context;
+import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.SweepGradient;
+import android.os.SystemClock;
+import android.view.View;
+import android.widget.FrameLayout;
+
+import org.telegram.messenger.AndroidUtilities;
+import org.telegram.ui.Components.BackupImageView;
+import org.telegram.ui.Components.LayoutHelper;
+
+/** Hologram over the profile picture: iridescent rim, scan lines, a light sweep. */
+public final class MwtkHolo {
+
+    private MwtkHolo() {
+    }
+
+    public static void attach(FrameLayout container, BackupImageView avatar) {
+        if (container == null || avatar == null) {
+            return;
+        }
+        container.addView(new HoloView(container.getContext(), avatar),
+            LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+    }
+
+    @SuppressLint("ViewConstructor")
+    private static final class HoloView extends View {
+
+        private final BackupImageView avatar;
+        private final Paint rim = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint lines = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint sweep = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Matrix matrix = new Matrix();
+        private final RectF rect = new RectF();
+        private final Path clip = new Path();
+        private final long started = SystemClock.elapsedRealtime();
+
+        HoloView(Context context, BackupImageView avatar) {
+            super(context);
+            this.avatar = avatar;
+            rim.setStyle(Paint.Style.STROKE);
+            lines.setColor(0x14ffffff);
+            setWillNotDraw(false);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            MwtkConfig.load();
+            if (!MwtkConfig.effects || !MwtkConfig.flag(MwtkConfig.HOLO, true) || getWidth() == 0) {
+                return;
+            }
+            int[] radii = avatar.getImageReceiver().getRoundRadius();
+            float radius = radii != null && radii.length > 0 ? radii[0] : getWidth() / 2f;
+            float t = (SystemClock.elapsedRealtime() - started) / 1000f;
+            int accent = MwtkConfig.accent();
+            rect.set(0, 0, getWidth(), getHeight());
+
+            SweepGradient gradient = new SweepGradient(getWidth() / 2f, getHeight() / 2f,
+                new int[] { accent, 0xffaa5aff, 0xff00e6ff, 0xff78ffaa, accent }, null);
+            matrix.setRotate((t * 40f) % 360f, getWidth() / 2f, getHeight() / 2f);
+            gradient.setLocalMatrix(matrix);
+            rim.setShader(gradient);
+            for (int i = 3; i > 0; i--) {
+                rim.setStrokeWidth(AndroidUtilities.dp(1.2f + i * 1.4f));
+                rim.setAlpha(40 * (4 - i));
+                canvas.drawRoundRect(rect, radius, radius, rim);
+            }
+            rim.setAlpha(230);
+            rim.setStrokeWidth(AndroidUtilities.dp(1.6f));
+            canvas.drawRoundRect(rect, radius, radius, rim);
+
+            canvas.save();
+            clip.reset();
+            clip.addRoundRect(rect, radius, radius, Path.Direction.CW);
+            canvas.clipPath(clip);
+            float step = AndroidUtilities.dp(4);
+            float shift = (t * AndroidUtilities.dp(12)) % step;
+            for (float y = shift; y < getHeight(); y += step) {
+                canvas.drawLine(0, y, getWidth(), y, lines);
+            }
+            float phase = (t / 3.2f) % 1f;
+            float x = -getWidth() * 0.5f + phase * getWidth() * 2f;
+            sweep.setShader(new LinearGradient(x, 0, x + getWidth() * 0.4f, getHeight(),
+                new int[] { 0x00ffffff, 0x2ea0e6ff, 0x00ffffff }, null, Shader.TileMode.CLAMP));
+            canvas.drawRect(rect, sweep);
+            canvas.restore();
+            postInvalidateDelayed(40);
+        }
+    }
+}
