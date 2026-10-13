@@ -243,6 +243,25 @@ public final class MwtkLyrics {
 
     // ------------------------------------------------------------ loading
 
+    /** Lines of the song that is playing now (empty while loading or when there are none). */
+    public static ArrayList<Line> linesFor(MessageObject message) {
+        if (message == null || currentKey == null || !currentKey.equals(keyFor(message))) {
+            return new ArrayList<>();
+        }
+        return lines;
+    }
+
+    /** Playback position with the user's offset for this song applied. */
+    public static long positionFor(MessageObject message) {
+        long position = MediaController.getInstance().getCurrentPosition();
+        return message == null ? position : position + offsetFor(keyFor(message));
+    }
+
+    /** Whether lyrics for this song are saved on the device. */
+    public static boolean hasCached(MessageObject message) {
+        return message != null && MwtkStore.file(cacheName(keyFor(message), ".lrc")).exists();
+    }
+
     private static String keyFor(MessageObject message) {
         String title = message.getMusicTitle();
         String performer = message.getMusicAuthor();

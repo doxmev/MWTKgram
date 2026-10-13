@@ -54,6 +54,13 @@ void ShowOffsetBox(not_null<Window::SessionController*> controller);
 void ShowSyncEditor(not_null<Window::SessionController*> controller);
 void ShowSearchBox(not_null<Window::SessionController*> controller);
 
+// Lyrics saved on this computer for the song in this file.
+[[nodiscard]] bool HasLyrics(DocumentData *document);
+
+// The whole text of the song that plays, like in VK: the current line
+// glows and follows the music, a click on a line seeks there.
+void ShowLyricsList(not_null<Window::SessionController*> controller);
+
 // Song context menu: hide chats, timing shift and the sync editor.
 void FillSongMenu(
 	not_null<Ui::PopupMenu*> menu,

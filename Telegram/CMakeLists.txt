@@ -2368,6 +2368,8 @@ PRIVATE
     mwtk/mwtk_hotkeys.h
     mwtk/mwtk_lyrics.cpp
     mwtk/mwtk_lyrics.h
+    mwtk/mwtk_music.cpp
+    mwtk/mwtk_music.h
     mwtk/mwtk_names.cpp
     mwtk/mwtk_names.h
     mwtk/mwtk_notes.cpp

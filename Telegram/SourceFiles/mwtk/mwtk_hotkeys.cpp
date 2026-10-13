@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_phrases.h"
+#include "mwtk/mwtk_music.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_share.h"
 #include "settings.h"
@@ -149,7 +150,7 @@ void Run(Action action) {
 	switch (action) {
 	case Action::Playlists:
 		if (controller) {
-			Playlists::ShowPlaylistsBox(controller);
+			Music::Show(controller);
 		}
 		break;
 	case Action::HideChats:

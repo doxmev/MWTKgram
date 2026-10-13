@@ -94,7 +94,7 @@ public final class MwtkPlaylists {
         fragment.showDialog(builder.create());
     }
 
-    private static synchronized int create(String name) {
+    public static synchronized int create(String name) {
         try {
             JSONObject list = new JSONObject();
             list.put("name", name);
@@ -106,7 +106,7 @@ public final class MwtkPlaylists {
         return lists().length() - 1;
     }
 
-    private static synchronized void add(int index, MessageObject message) {
+    public static synchronized void add(int index, MessageObject message) {
         JSONObject list = lists().optJSONObject(index);
         if (list == null) {
             return;
@@ -189,6 +189,168 @@ public final class MwtkPlaylists {
             }
         });
         fragment.showDialog(builder.create());
+    }
+
+    // ------------------------------------------------------------ public api
+
+    public interface Loaded {
+        /** Messages in track order; null where the message is gone. */
+        void run(ArrayList<MessageObject> messages);
+    }
+
+    private static final java.util.HashMap<String, MessageObject> cache = new java.util.HashMap<>();
+
+    public static synchronized int count() {
+        return lists().length();
+    }
+
+    public static synchronized String name(int index) {
+        JSONObject list = lists().optJSONObject(index);
+        return list != null ? list.optString("name") : "";
+    }
+
+    /** Copy of the tracks: [{peer, msg, title, performer, duration}]. */
+    public static synchronized JSONArray tracks(int index) {
+        JSONObject list = lists().optJSONObject(index);
+        JSONArray tracks = list != null ? list.optJSONArray("tracks") : null;
+        try {
+            return tracks != null ? new JSONArray(tracks.toString()) : new JSONArray();
+        } catch (Throwable e) {
+            return new JSONArray();
+        }
+    }
+
+    public static synchronized void rename(int index, String name) {
+        JSONObject list = lists().optJSONObject(index);
+        if (list != null && !name.trim().isEmpty()) {
+            try {
+                list.put("name", name.trim());
+            } catch (Throwable ignore) {
+            }
+            save();
+        }
+    }
+
+    public static synchronized void remove(int index) {
+        if (index >= 0 && index < lists().length()) {
+            lists().remove(index);
+            save();
+        }
+    }
+
+    public static synchronized void removeTrack(int index, int track) {
+        JSONObject list = lists().optJSONObject(index);
+        JSONArray tracks = list != null ? list.optJSONArray("tracks") : null;
+        if (tracks != null && track >= 0 && track < tracks.length()) {
+            tracks.remove(track);
+            save();
+        }
+    }
+
+    public static MessageObject cached(long peer, long msg) {
+        synchronized (cache) {
+            return cache.get(peer + ":" + msg);
+        }
+    }
+
+    /** Loads the messages of a playlist (from the cache or the server). */
+    public static void load(int index, Loaded done) {
+        JSONArray tracks = tracks(index);
+        final ArrayList<long[]> order = new ArrayList<>();
+        for (int i = 0; i < tracks.length(); i++) {
+            JSONObject t = tracks.optJSONObject(i);
+            if (t != null) {
+                order.add(new long[] { t.optLong("peer"), t.optLong("msg") });
+            }
+        }
+        loadOrder(order, done);
+    }
+
+    private static void loadOrder(ArrayList<long[]> order, Loaded done) {
+        final int account = UserConfig.selectedAccount;
+        java.util.HashMap<Long, ArrayList<Integer>> byChannel = new java.util.HashMap<>();
+        for (long[] track : order) {
+            if (cached(track[0], track[1]) != null) {
+                continue;
+            }
+            long channel = DialogObject.isChatDialog(track[0])
+                && org.telegram.messenger.ChatObject.isChannel(MessagesController.getInstance(account).getChat(-track[0]))
+                ? -track[0] : 0;
+            ArrayList<Integer> ids = byChannel.get(channel);
+            if (ids == null) {
+                ids = new ArrayList<>();
+                byChannel.put(channel, ids);
+            }
+            ids.add((int) track[1]);
+        }
+        final Runnable finish = () -> {
+            ArrayList<MessageObject> result = new ArrayList<>();
+            for (long[] track : order) {
+                result.add(cached(track[0], track[1]));
+            }
+            done.run(result);
+        };
+        if (byChannel.isEmpty()) {
+            finish.run();
+            return;
+        }
+        final int[] pending = { byChannel.size() };
+        for (java.util.Map.Entry<Long, ArrayList<Integer>> entry : byChannel.entrySet()) {
+            TLObject request;
+            final long channel = entry.getKey();
+            if (channel != 0) {
+                TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
+                req.channel = MessagesController.getInstance(account).getInputChannel(channel);
+                req.id = entry.getValue();
+                request = req;
+            } else {
+                TLRPC.TL_messages_getMessages req = new TLRPC.TL_messages_getMessages();
+                req.id = entry.getValue();
+                request = req;
+            }
+            ConnectionsManager.getInstance(account).sendRequest(request, (response, error) -> {
+                ArrayList<MessageObject> objects = new ArrayList<>();
+                if (response instanceof TLRPC.messages_Messages) {
+                    TLRPC.messages_Messages res = (TLRPC.messages_Messages) response;
+                    MessagesController.getInstance(account).putUsers(res.users, false);
+                    MessagesController.getInstance(account).putChats(res.chats, false);
+                    for (TLRPC.Message message : res.messages) {
+                        if (message instanceof TLRPC.TL_messageEmpty) {
+                            continue;
+                        }
+                        objects.add(new MessageObject(account, message, false, true));
+                    }
+                }
+                AndroidUtilities.runOnUIThread(() -> {
+                    synchronized (cache) {
+                        for (MessageObject object : objects) {
+                            cache.put(object.getDialogId() + ":" + object.getId(), object);
+                        }
+                    }
+                    if (--pending[0] == 0) {
+                        finish.run();
+                    }
+                });
+            });
+        }
+    }
+
+    /** Starts a ready list: plays {@code first} and continues through the list. */
+    public static void playMessages(ArrayList<MessageObject> list, MessageObject first) {
+        ArrayList<MessageObject> playlist = new ArrayList<>();
+        for (MessageObject object : list) {
+            if (object != null && object.isMusic()) {
+                playlist.add(object);
+            }
+        }
+        if (playlist.isEmpty()) {
+            return;
+        }
+        if (first == null || !playlist.contains(first)) {
+            first = playlist.get(0);
+        }
+        Collections.reverse(playlist);
+        MediaController.getInstance().setPlaylist(playlist, first, 0);
     }
 
     /** Loads the playlist messages from the server and starts playback. */

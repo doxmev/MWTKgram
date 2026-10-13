@@ -26,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_notify.h"
 #include "mwtk/mwtk_phrases.h"
 #include "mwtk/mwtk_share.h"
+#include "mwtk/mwtk_music.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
 #include "base/timer.h"
@@ -822,7 +823,7 @@ void MwtkSettings::setupContent() {
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Музыка")));
 	AddActionButton(content, Utf("Мои плейлисты"), [=] {
-		::Mwtk::Playlists::ShowPlaylistsBox(window);
+		::Mwtk::Music::Show(window);
 	});
 	AddOptionToggle(window, content, Utf("Летающий текст песни"), ::Mwtk::kOptionLyrics);
 	AddOptionToggle(window, content, Utf("Искать текст в интернете (LRCLIB)"), ::Mwtk::kOptionLyricsOnline);

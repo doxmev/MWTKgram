@@ -1708,6 +1708,184 @@ void ShowSearchBox(not_null<Window::SessionController*> controller) {
 	}));
 }
 
+bool HasLyrics(DocumentData *document) {
+	if (!document) {
+		return false;
+	}
+	const auto info = InfoFor(document);
+	return !info.title.isEmpty() && QFile::exists(CachePath(info, u".lrc"_q));
+}
+
+namespace {
+
+class LinesWidget final : public Ui::RpWidget {
+public:
+	explicit LinesWidget(QWidget *parent)
+	: RpWidget(parent)
+	, _timer([=] { update(); }) {
+		resize(st::boxWideWidth, style::ConvertScale(420));
+		setMouseTracking(true);
+		_timer.callEach(33);
+		Current().changes.events(
+		) | rpl::on_next([=] {
+			_scroll = 0.;
+			update();
+		}, lifetime());
+	}
+
+protected:
+	int resizeGetHeight(int newWidth) override {
+		return style::ConvertScale(420);
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = QPainter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+		auto gradient = QLinearGradient(0., 0., 0., height());
+		gradient.setColorAt(0., QColor(42, 7, 16));
+		gradient.setColorAt(1., QColor(11, 5, 7));
+		p.fillRect(rect(), gradient);
+
+		const auto px = [](int value) { return style::ConvertScale(value); };
+		const auto &state = Current();
+		_hits.clear();
+		if (state.lines.empty()) {
+			p.setPen(QColor(255, 255, 255));
+			auto font = st::semiboldFont->f;
+			font.setPixelSize(px(20));
+			p.setFont(font);
+			p.drawText(
+				rect().adjusted(px(24), 0, -px(24), 0),
+				Qt::AlignCenter | Qt::TextWordWrap,
+				QString::fromUtf8(state.loading
+					? "Ищу текст…"
+					: "Текста пока нет.\nНажми «Найти текст» внизу."));
+			return;
+		}
+		const auto now = position();
+		auto current = -1;
+		for (auto i = 0; i != int(state.lines.size()); ++i) {
+			if (state.lines[i].at <= now) {
+				current = i;
+			}
+		}
+		auto font = st::semiboldFont->f;
+		font.setPixelSize(px(22));
+		p.setFont(font);
+		const auto metrics = QFontMetrics(font);
+		const auto left = px(24);
+		const auto lineWidth = width() - left * 2;
+		const auto gap = px(14);
+		auto heights = std::vector<int>();
+		heights.reserve(state.lines.size());
+		auto y = 0;
+		auto currentY = 0;
+		for (auto i = 0; i != int(state.lines.size()); ++i) {
+			const auto h = metrics.boundingRect(
+				QRect(0, 0, lineWidth, 100000),
+				Qt::TextWordWrap,
+				state.lines[i].text).height();
+			heights.push_back(h);
+			if (i == current) {
+				currentY = y;
+			}
+			y += h + gap;
+		}
+		const auto target = std::max(0., currentY - height() * 0.32);
+		_scroll += (target - _scroll) * 0.14;
+		y = px(24) - int(_scroll);
+		for (auto i = 0; i != int(state.lines.size()); ++i) {
+			const auto h = heights[i];
+			const auto line = QRect(left, y, lineWidth, h);
+			if (y + h > -px(40) && y < height() + px(40)) {
+				if (i == current) {
+					// A soft red glow under the current line.
+					p.setPen(QColor(255, 45, 70, 90));
+					for (const auto &shift : { QPoint(-1, 0), QPoint(1, 0), QPoint(0, -1), QPoint(0, 1) }) {
+						p.drawText(line.translated(shift), Qt::TextWordWrap, state.lines[i].text);
+					}
+					p.setPen(QColor(255, 255, 255));
+				} else {
+					p.setPen(QColor(255, 255, 255, (i < current) ? 130 : 72));
+				}
+				p.drawText(line, Qt::TextWordWrap, state.lines[i].text);
+				_hits.push_back({ line, state.lines[i].at });
+			}
+			y += h + gap;
+		}
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		for (const auto &[rect, at] : _hits) {
+			if (!rect.contains(e->pos())) {
+				continue;
+			}
+			const auto playing = ::Media::Player::instance()->getState(
+				AudioMsgId::Type::Song);
+			const auto frequency = std::max(playing.frequency, 1);
+			const auto length = playing.length * 1000 / frequency;
+			if (length > 0) {
+				const auto songAt = at - Current().offset;
+				::Media::Player::instance()->finishSeeking(
+					AudioMsgId::Type::Song,
+					std::clamp(double(songAt) / double(length), 0., 1.));
+			}
+			return;
+		}
+	}
+
+private:
+	[[nodiscard]] crl::time position() {
+		const auto playing = ::Media::Player::instance()->getState(
+			AudioMsgId::Type::Song);
+		const auto frequency = std::max(playing.frequency, 1);
+		const auto value = crl::time(playing.position * 1000 / frequency);
+		const auto now = crl::now();
+		if (value != _lastPosition) {
+			_lastPosition = value;
+			_lastAt = now;
+		}
+		const auto running = ::Media::Player::ShowPauseIcon(playing.state);
+		return _lastPosition
+			+ (running ? std::min(now - _lastAt, crl::time(1000)) : 0)
+			+ Current().offset;
+	}
+
+	base::Timer _timer;
+	double _scroll = 0.;
+	crl::time _lastPosition = -1;
+	crl::time _lastAt = 0;
+	std::vector<std::pair<QRect, crl::time>> _hits;
+
+};
+
+} // namespace
+
+void ShowLyricsList(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		const auto &track = Current().track;
+		box->setTitle(rpl::single(track.title.isEmpty()
+			? QString::fromUtf8("Текст песни")
+			: (track.performer.isEmpty()
+				? track.title
+				: (track.performer + QString::fromUtf8(" — ") + track.title))));
+		box->setWidth(st::boxWideWidth + style::ConvertScale(150));
+		box->addRow(object_ptr<LinesWidget>(box), style::margins());
+		box->addButton(rpl::single(QString::fromUtf8("Найти текст")), [=] {
+			ShowSearchBox(controller);
+		});
+		box->addButton(rpl::single(QString::fromUtf8("Исправить")), [=] {
+			ShowSyncEditor(controller);
+		});
+		box->addButton(rpl::single(QString::fromUtf8("Сдвиг")), [=] {
+			ShowOffsetBox(controller);
+		});
+		box->addLeftButton(rpl::single(QString::fromUtf8("Закрыть")), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
 void FillSongMenu(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Window::SessionController*> controller) {
