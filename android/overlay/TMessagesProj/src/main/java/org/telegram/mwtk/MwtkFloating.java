@@ -35,6 +35,8 @@ import java.util.Random;
  */
 public final class MwtkFloating {
 
+    private static java.lang.ref.WeakReference<View> tabletBubbles;
+
     private MwtkFloating() {
     }
 
@@ -44,7 +46,20 @@ public final class MwtkFloating {
         }
         FloatingView floating = new FloatingView(contentView.getContext(), fragment, list);
         floating.setVisibility(View.GONE);
-        contentView.addView(floating, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Tablet mode: bubbles fly over the whole screen, not only the chat list column.
+        FrameLayout target = contentView;
+        FrameLayout root = MwtkOverlay.root();
+        if (AndroidUtilities.isTablet() && root != null && MwtkTablet.enabled()) {
+            target = root;
+        }
+        View previous = tabletBubbles != null ? tabletBubbles.get() : null;
+        if (previous != null && previous.getParent() instanceof ViewGroup) {
+            ((ViewGroup) previous.getParent()).removeView(previous);
+        }
+        if (target == root) {
+            tabletBubbles = new java.lang.ref.WeakReference<>(floating);
+        }
+        target.addView(floating, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         fragment.getActionBar().setOnLongClickListener(v -> {
             MwtkConfig.load();
             if (!MwtkConfig.effects) {

@@ -91,6 +91,7 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "3D-фигуры", "Вращающиеся каркасные кубы", MwtkConfig.FIGURES);
         flag(context, "Времена года", "Снег зимой, листья осенью, лепестки весной", MwtkConfig.SEASONS, true);
         flagCycle(context, "Эффекты в чате", CHAT_FX_MODES, MwtkConfig.CHAT_FX, 1, null);
+        flag(context, "Режим планшета", "Справа 3D-сцена, текст песни на всю правую часть, чаты летают по всему экрану", MwtkConfig.TABLET, true);
         flag(context, "Фон в такт музыке", "Нужен доступ к микрофону (как для голосовых)", MwtkConfig.MUSIC_PULSE, true);
         flag(context, "Секреты в 3 часа ночи", "Красная луна и глаза в лесу", MwtkConfig.NIGHT, true);
         toggle(context, "Фон следует за наклоном", "Гироскоп двигает надписи и фигуры", MwtkConfig.TILT);

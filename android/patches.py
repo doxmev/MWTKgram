@@ -117,6 +117,12 @@ edit("TMessagesProj/src/main/java/org/telegram/messenger/LocaleController.java",
     "        final String value = getStringV2(key, res, fallback);\n",
     "        final String value = org.telegram.mwtk.MwtkBrand.apply(res, getStringV2(key, res, fallback));\n"))
 
+# Tablet mode: a live MWTK scene on the free right side.
+edit(LAUNCH, replace_once(
+    "            launchLayout.addView(backgroundTablet, LayoutHelper.createRelative(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n",
+    "            launchLayout.addView(backgroundTablet, LayoutHelper.createRelative(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n"
+    "            org.telegram.mwtk.MwtkTablet.attach(backgroundTablet);\n"))
+
 # App-wide layers: backdrop, flying lyrics, hologram banners, fly-by.
 edit(LAUNCH, replace_once(
     "        frameLayout.addView(drawerLayoutContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n",

@@ -468,8 +468,14 @@ public final class MwtkLyrics {
             float sizeK = MwtkConfig.num(MwtkConfig.LYRICS_SIZE, 100) / 100f;
             int accent = MwtkConfig.accent();
             Random r = new Random(currentKey == null ? index : currentKey.hashCode() * 31L + index);
-            boolean wide = getWidth() > AndroidUtilities.dp(700); // tablet or landscape: use the room
-            float base = Math.max(AndroidUtilities.dp(22), Math.min(getWidth() / (wide ? 14f : 9f), AndroidUtilities.dp(wide ? 56 : 40))) * sizeK;
+            // Tablet mode: the lyrics use the free right side; "hide chats" keeps the whole screen.
+            android.graphics.Rect area = hideMode ? null : MwtkTablet.freeArea(this);
+            float areaLeft = area != null ? area.left : 0;
+            float areaTop = area != null ? area.top : 0;
+            float areaW = area != null ? area.width() : getWidth();
+            float areaH = area != null ? area.height() : getHeight();
+            boolean wide = areaW > AndroidUtilities.dp(700) || (area != null && areaW > AndroidUtilities.dp(420));
+            float base = Math.max(AndroidUtilities.dp(22), Math.min(areaW / (wide ? 14f : 9f), AndroidUtilities.dp(wide ? 56 : 40))) * sizeK;
             int total = 0;
             for (String t : texts) {
                 total += t.length() + 1;
@@ -489,10 +495,10 @@ public final class MwtkLyrics {
                 w.fromY = (float) Math.sin(angle) * base * 2;
                 result.add(w);
             }
-            float width = getWidth();
-            float height = getHeight();
-            float cx = layout == 2 ? width / 2 : width * (0.5f + (r.nextFloat() - 0.5f) * 0.2f);
-            float cy = layout == 2 ? height * 0.42f : height * (0.38f + (r.nextFloat() - 0.5f) * 0.16f);
+            float width = areaW;
+            float height = areaH;
+            float cx = areaLeft + (layout == 2 ? width / 2 : width * (0.5f + (r.nextFloat() - 0.5f) * 0.2f));
+            float cy = areaTop + (layout == 2 ? height * 0.42f : height * (0.38f + (r.nextFloat() - 0.5f) * 0.16f));
             // On a narrow phone screen every layout wraps into rows; a wide screen fits longer rows.
             int perRow = layout == 1 ? 1 : (wide ? 6 : 3);
             float rowH = base * 1.3f;

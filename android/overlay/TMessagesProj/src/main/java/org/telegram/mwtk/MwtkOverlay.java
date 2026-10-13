@@ -64,6 +64,11 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
         refreshBackdrop();
     }
 
+    /** The app-wide root layer, or null before the main screen exists. */
+    public static FrameLayout root() {
+        return instance != null ? instance.root : null;
+    }
+
     public static void attach(FrameLayout root, View content) {
         if (instance == null && root != null) {
             instance = new MwtkOverlay(root, content);
