@@ -452,7 +452,7 @@ base::options::toggle OptionSeasons({
 	.id = kOptionSeasons,
 	.name = "MWTKgram seasons",
 	.description = "Snow, leaves and holidays in scenes.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionFlyby({

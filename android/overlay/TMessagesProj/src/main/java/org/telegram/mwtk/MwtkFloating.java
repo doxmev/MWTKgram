@@ -236,21 +236,37 @@ public final class MwtkFloating {
             if (dt <= 0) {
                 return;
             }
-            float gx = MwtkMotion.tiltX * AndroidUtilities.dp(900);
-            float gy = MwtkMotion.tiltY * AndroidUtilities.dp(900) + AndroidUtilities.dp(60);
+            // No tilt and no gravity: on some phones the sensor pinned every
+            // bubble to the bottom. Bubbles drift and bounce on their own.
+            // ⚙ and ✕ always sit at the bottom center of the real size.
+            for (Bubble b : bubbles) {
+                if (b.action != ACTION_NONE) {
+                    b.x = getWidth() / 2f + (b.action == ACTION_CLOSE ? b.r * 2 : -b.r * 2);
+                    b.y = getHeight() - b.r * 3;
+                }
+            }
+            float minSpeed = AndroidUtilities.dp(18);
+            float maxSpeed = AndroidUtilities.dp(1400);
             int w = getWidth();
             int h = getHeight();
             if (w <= 0 || h <= 0) {
                 return; // just moved to another parent, not laid out yet
             }
             for (Bubble b : bubbles) {
-                if (b == dragged) {
+                if (b == dragged || b.action != ACTION_NONE) {
                     continue;
                 }
-                b.vx += gx * dt;
-                b.vy += gy * dt;
-                b.vx *= 0.995f;
-                b.vy *= 0.995f;
+                b.vx *= 0.992f;
+                b.vy *= 0.992f;
+                float speed = (float) Math.hypot(b.vx, b.vy);
+                if (speed < minSpeed) {
+                    double angle = speed < 1f ? Math.random() * 6.28 : Math.atan2(b.vy, b.vx);
+                    b.vx = (float) Math.cos(angle) * minSpeed;
+                    b.vy = (float) Math.sin(angle) * minSpeed;
+                } else if (speed > maxSpeed) {
+                    b.vx *= maxSpeed / speed;
+                    b.vy *= maxSpeed / speed;
+                }
                 b.x += b.vx * dt;
                 b.y += b.vy * dt;
                 if (b.x < b.r) { b.x = b.r; b.vx = Math.abs(b.vx) * 0.7f; }
@@ -270,8 +286,15 @@ public final class MwtkFloating {
                         float d = (float) Math.sqrt(d2);
                         float push = (min - d) / 2f;
                         float nx = dx / d, ny = dy / d;
-                        if (a != dragged) { a.x -= nx * push; a.y -= ny * push; }
-                        if (b != dragged) { b.x += nx * push; b.y += ny * push; }
+                        boolean aFixed = a == dragged || a.action != ACTION_NONE;
+                        boolean bFixed = b == dragged || b.action != ACTION_NONE;
+                        if (aFixed && bFixed) {
+                            continue;
+                        }
+                        float pa = bFixed ? push * 2 : (aFixed ? 0 : push);
+                        float pb = aFixed ? push * 2 : (bFixed ? 0 : push);
+                        a.x -= nx * pa; a.y -= ny * pa;
+                        b.x += nx * pb; b.y += ny * pb;
                         float rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
                         if (rel < 0) {
                             a.vx += nx * rel * 0.5f; a.vy += ny * rel * 0.5f;
@@ -311,7 +334,7 @@ public final class MwtkFloating {
                     if (tracker != null) {
                         tracker.addMovement(event);
                     }
-                    if (dragged != null) {
+                    if (dragged != null && dragged.action == ACTION_NONE) {
                         dragged.x = event.getX();
                         dragged.y = event.getY();
                     }

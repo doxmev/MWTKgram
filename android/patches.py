@@ -123,6 +123,18 @@ edit(LAUNCH, replace_once(
     "            launchLayout.addView(backgroundTablet, LayoutHelper.createRelative(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n"
     "            org.telegram.mwtk.MwtkTablet.attach(backgroundTablet);\n"))
 
+# Playlists button in the bottom bar, next to Chats / Contacts / Settings / Profile.
+edit("TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java", replace_once(
+    "        checkUi_callTabVisible(getUserConfig().showCallsTab, false);\n",
+    "        checkUi_callTabVisible(getUserConfig().showCallsTab, false);\n"
+    "        {\n"
+    "            GlassTabView mwtkPlaylists = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.MUSIC, R.string.MwtkPlaylistsTab);\n"
+    "            mwtkPlaylists.setOnClickListener(v -> org.telegram.mwtk.MwtkPlaylists.showListBox(this));\n"
+    "            tabsView.addView(mwtkPlaylists);\n"
+    "            tabsView.setViewVisible(mwtkPlaylists, true, false);\n"
+    "            tabsView.setMaxWidth(dp(410 + DialogsActivity.MAIN_TABS_MARGIN * 2));\n"
+    "        }\n"))
+
 # App-wide layers: backdrop, flying lyrics, hologram banners, fly-by.
 edit(LAUNCH, replace_once(
     "        frameLayout.addView(drawerLayoutContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n",

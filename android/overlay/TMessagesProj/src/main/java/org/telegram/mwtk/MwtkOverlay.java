@@ -127,7 +127,7 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
             return;
         }
         MessagesController controller = MessagesController.getInstance(account);
-        if (controller.isDialogMuted(dialogId, last.getTopicId())) {
+        if (isMuted(account, dialogId, last.getTopicId())) {
             return; // muted chats stay silent: no banner, no fly-by
         }
         TLObject peer = DialogObject.isUserDialog(dialogId)
@@ -142,6 +142,34 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
         if (MwtkConfig.num(MwtkConfig.NOTIFY_STYLE, 1) != 0) {
             showBanner(account, dialogId, peer, last);
         }
+    }
+
+    /**
+     * Only a mute the user set on this chat counts. Telegram's own check also
+     * treats every chat as muted when notifications are switched off globally
+     * in its settings, which hid all MWTK banners.
+     */
+    private static boolean isMuted(int account, long dialogId, long topicId) {
+        android.content.SharedPreferences prefs = MessagesController.getNotificationsSettings(account);
+        String key = org.telegram.messenger.NotificationsController.getSharedPrefKey(dialogId, topicId);
+        int type = prefs.getInt("notify2_" + key, -1);
+        if (type == -1 && topicId != 0) {
+            key = org.telegram.messenger.NotificationsController.getSharedPrefKey(dialogId, 0);
+            type = prefs.getInt("notify2_" + key, -1);
+        }
+        if (type == 2) {
+            return true;
+        }
+        if (type == 3) {
+            int until = prefs.getInt("notifyuntil_" + key, 0);
+            return until >= org.telegram.tgnet.ConnectionsManager.getInstance(account).getCurrentTime();
+        }
+        if (type == -1 && !DialogObject.isUserDialog(dialogId)) {
+            // Channels are quiet by default, groups and private chats are not.
+            TLRPC.Chat chat = MessagesController.getInstance(account).getChat(-dialogId);
+            return chat != null && org.telegram.messenger.ChatObject.isChannel(chat) && !chat.megagroup;
+        }
+        return false;
     }
 
     private void showBanner(int account, long dialogId, TLObject peer, MessageObject message) {

@@ -595,6 +595,8 @@ private:
 	int _coverMode = -1;
 	crl::time _coverFrame = 0;
 	float64 _coverBeat = 0.;
+	QRegion _painted; // what the last frame drew, repainted next frame
+	[[nodiscard]] QRegion expectedRegion(crl::time now) const;
 	crl::time _statePosition = 0;
 	crl::time _stateAt = 0;
 	bool _playing = false;
@@ -668,6 +670,7 @@ void LyricsWidget::refresh() {
 	_layoutGeneration = -1;
 	const auto hide = hideMode();
 	setAttribute(Qt::WA_TransparentForMouseEvents, !hide);
+	setAttribute(Qt::WA_OpaquePaintEvent, hide);
 	setVisible(_enabled && _document && !Current().lines.empty());
 	if (isVisible()) {
 		raise();
@@ -741,7 +744,24 @@ void LyricsWidget::tick() {
 			return p.life <= 0.;
 		}),
 		_particles.end());
-	update();
+	if (hideMode()) {
+		update();
+	} else {
+		// Only where words were and where they will be: the lyrics float
+		// over the whole window, a full repaint would redraw all of Telegram.
+		ensureLayouts(position());
+		auto region = _painted + expectedRegion(position());
+		for (const auto &particle : _particles) {
+			region += QRect(
+				int(particle.position.x()) - 3,
+				int(particle.position.y()) - 3,
+				int(particle.size) + 7,
+				int(particle.size) + 7);
+		}
+		if (!region.isEmpty()) {
+			update(region);
+		}
+	}
 	if (!_playing && _particles.empty()) {
 		_timer.cancel();
 	}
@@ -977,6 +997,10 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 		1.);
 	const auto ratio = word.dim.devicePixelRatio();
 	const auto size = QSizeF(word.dim.size()) / ratio;
+	{
+		const auto r = std::max(size.width(), size.height()) * 0.55 * scale + 6.;
+		_painted += QRectF(position - QPointF(r, r), QSizeF(2 * r, 2 * r)).toAlignedRect();
+	}
 	p.save();
 	p.translate(position);
 	p.rotate(word.rotation * 180. / 3.14159265358979323846);
@@ -993,8 +1017,35 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 	p.restore();
 }
 
+QRegion LyricsWidget::expectedRegion(crl::time now) const {
+	auto result = QRegion();
+	for (const auto &layout : _layouts) {
+		for (const auto &word : layout.words) {
+			if (word.gone
+				|| word.dim.isNull()
+				|| now < word.start - kAppearAhead - 100
+				|| now > word.out + kVanish + 100) {
+				continue;
+			}
+			const auto size = QSizeF(word.dim.size()) / word.dim.devicePixelRatio();
+			const auto r = std::max(size.width(), size.height()) * 0.7 + 24.;
+			const auto flying = (now < word.start - kAppearAhead + kFlyIn);
+			auto rect = QRectF(word.position - QPointF(r, r), QSizeF(2 * r, 2 * r));
+			if (flying) {
+				rect = rect.united(rect.translated(word.from));
+			}
+			if (now >= word.out) {
+				rect = rect.united(rect.translated(0., -130.)).adjusted(-32., 0., 32., 0.);
+			}
+			result += rect.toAlignedRect();
+		}
+	}
+	return result;
+}
+
 void LyricsWidget::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
+	_painted = QRegion();
 	if (hideMode()) {
 		if (!PaintRoomInWindow(p, this)) {
 			const auto accent = PaletteAt(
@@ -1044,6 +1095,11 @@ void LyricsWidget::paintEvent(QPaintEvent *e) {
 	if (!_particles.empty()) {
 		p.setPen(Qt::NoPen);
 		for (const auto &particle : _particles) {
+			_painted += QRect(
+				int(particle.position.x()) - 2,
+				int(particle.position.y()) - 2,
+				int(particle.size) + 5,
+				int(particle.size) + 5);
 			p.setOpacity(std::clamp(particle.life, 0., 1.));
 			p.fillRect(
 				QRectF(particle.position, QSizeF(particle.size, particle.size)),
