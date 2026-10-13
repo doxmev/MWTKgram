@@ -982,4 +982,110 @@ public final class MwtkLyrics {
             });
         }
     }
+
+    /** Manual search on LRCLIB: the user picks the right version from a list. */
+    public static void showSearch(BaseFragment fragment, MessageObject message) {
+        Context context = fragment.getParentActivity();
+        if (context == null || message == null) {
+            return;
+        }
+        final String key = keyFor(message);
+        final int duration = (int) message.getDuration();
+        String title = message.getMusicTitle() == null ? "" : cleanTitle(message.getMusicTitle());
+        String performer = message.getMusicAuthor() == null ? "" : message.getMusicAuthor();
+        LinearLayout box = new LinearLayout(context);
+        box.setOrientation(LinearLayout.VERTICAL);
+        EditText field = MwtkUi.field(context, (performer + " " + title).trim(), "Исполнитель и название", false, false);
+        box.addView(field, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 8));
+        TextView status = new TextView(context);
+        status.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+        status.setTextSize(14);
+        status.setText("Нажми «Искать» и выбери подходящий вариант.");
+        box.addView(status, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 6));
+        android.widget.ScrollView scroll = new android.widget.ScrollView(context);
+        LinearLayout list = new LinearLayout(context);
+        list.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(list, new android.widget.FrameLayout.LayoutParams(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        box.addView(scroll, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 260, 16, 0, 16, 0));
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        builder.setTitle("Найти текст песни");
+        builder.setView(box);
+        builder.setPositiveButton("Искать", null);
+        builder.setNegativeButton("Закрыть", null);
+        AlertDialog dialog = builder.create();
+        fragment.showDialog(dialog);
+        View searchButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        if (searchButton == null) {
+            return;
+        }
+        searchButton.setOnClickListener(v -> {
+            String query = field.getText().toString().trim();
+            if (query.isEmpty()) {
+                return;
+            }
+            status.setText("Ищу…");
+            list.removeAllViews();
+            Utilities.globalQueue.postRunnable(() -> {
+                String body = null;
+                try {
+                    body = get("https://lrclib.net/api/search?q=" + URLEncoder.encode(query, "UTF-8"));
+                } catch (Throwable ignore) {
+                }
+                final String result = body;
+                AndroidUtilities.runOnUIThread(() -> {
+                    if (!dialog.isShowing()) {
+                        return;
+                    }
+                    if (result == null) {
+                        status.setText("Не получилось подключиться к сайту текстов. Проверь интернет.");
+                        return;
+                    }
+                    int shown = 0;
+                    try {
+                        JSONArray array = new JSONArray(result);
+                        for (int i = 0; i < array.length() && shown < 15; i++) {
+                            JSONObject item = array.optJSONObject(i);
+                            if (item == null) {
+                                continue;
+                            }
+                            final String synced = item.optString("syncedLyrics", "");
+                            if (synced.isEmpty() || "null".equals(synced)) {
+                                continue;
+                            }
+                            final double found = item.optDouble("duration", 0);
+                            TextView row = new TextView(context);
+                            row.setTextSize(15);
+                            row.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+                            row.setBackground(Theme.getSelectorDrawable(false));
+                            row.setPadding(AndroidUtilities.dp(8), AndroidUtilities.dp(10), AndroidUtilities.dp(8), AndroidUtilities.dp(10));
+                            row.setText(item.optString("artistName", "") + " — " + item.optString("trackName", "")
+                                + "  ·  " + ((int) found / 60) + ":" + String.format(java.util.Locale.US, "%02d", (int) found % 60));
+                            row.setOnClickListener(rv -> {
+                                String lrc = synced;
+                                if (duration > 0 && found > 0 && Math.abs(found - duration) > 3) {
+                                    double ratio = found / duration;
+                                    if (ratio > 0.55 && ratio < 1.7) {
+                                        lrc = scale(lrc, duration / found);
+                                    }
+                                }
+                                MwtkStore.writeText(cacheName(key, ".lrc"), lrc);
+                                MwtkStore.file(cacheName(key, ".none2")).delete();
+                                if (key.equals(currentKey)) {
+                                    currentKey = null;
+                                }
+                                dialog.dismiss();
+                                MwtkUi.toast("Текст сохранён");
+                            });
+                            list.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+                            shown++;
+                        }
+                    } catch (Throwable ignore) {
+                    }
+                    status.setText(shown > 0
+                        ? "Выбери вариант. Твой трек длится " + (duration / 60) + ":" + String.format(java.util.Locale.US, "%02d", duration % 60) + " — ближе по длине обычно точнее."
+                        : "Ничего с таймингами не нашлось. Попробуй написать иначе.");
+                });
+            });
+        });
+    }
 }

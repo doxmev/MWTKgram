@@ -27,6 +27,7 @@ public final class MwtkChatMenu {
     public static final int OPTION_HIDE_CHATS = 7803;
     public static final int OPTION_SYNC_LYRICS = 7804;
     public static final int OPTION_SHIFT_LYRICS = 7805;
+    public static final int OPTION_FIND_LYRICS = 7806;
 
     private MwtkChatMenu() {
     }
@@ -128,6 +129,9 @@ public final class MwtkChatMenu {
                     : "Спрятать чаты (текст песни)");
                 options.add(OPTION_HIDE_CHATS);
                 icons.add(R.drawable.msg_viewintopic);
+                items.add("Найти текст");
+                options.add(OPTION_FIND_LYRICS);
+                icons.add(R.drawable.msg_search);
                 items.add("Написать / исправить текст");
                 options.add(OPTION_SYNC_LYRICS);
                 icons.add(R.drawable.msg_edit);
@@ -151,6 +155,9 @@ public final class MwtkChatMenu {
                 break;
             case OPTION_SYNC_LYRICS:
                 MwtkLyrics.showSyncEditor(chat, message);
+                break;
+            case OPTION_FIND_LYRICS:
+                MwtkLyrics.showSearch(chat, message);
                 break;
             case OPTION_SHIFT_LYRICS:
                 MwtkLyrics.showOffsetBox(chat, message);

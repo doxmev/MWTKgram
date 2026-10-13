@@ -52,6 +52,7 @@ void ToggleHideChats();
 // Per-track timing shift and the sync editor.
 void ShowOffsetBox(not_null<Window::SessionController*> controller);
 void ShowSyncEditor(not_null<Window::SessionController*> controller);
+void ShowSearchBox(not_null<Window::SessionController*> controller);
 
 // Song context menu: hide chats, timing shift and the sync editor.
 void FillSongMenu(

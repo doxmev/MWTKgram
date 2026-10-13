@@ -1543,6 +1543,115 @@ void ShowSyncEditor(not_null<Window::SessionController*> controller) {
 	}));
 }
 
+void ShowSearchBox(not_null<Window::SessionController*> controller) {
+	const auto &state = Current();
+	if (!state.track.document) {
+		return;
+	}
+	const auto track = state.track;
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(QString::fromUtf8("Найти текст песни")));
+		box->setWidth(st::boxWideWidth);
+		const auto field = box->addRow(object_ptr<Ui::InputField>(
+			box,
+			st::defaultInputField,
+			rpl::single(QString::fromUtf8("Исполнитель и название")),
+			(track.performer + ' ' + CleanTitle(track.title)).trimmed()));
+		const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
+			box,
+			QString::fromUtf8("Нажми «Искать» и выбери подходящий вариант."),
+			st::boxDividerLabel));
+		const auto results = box->addRow(object_ptr<Ui::VerticalLayout>(box));
+		const auto alive = std::make_shared<bool>(true);
+		box->lifetime().add([=] { *alive = false; });
+
+		const auto apply = [=](QString lrc, double found) {
+			const auto duration = track.duration / 1000.;
+			if (duration > 0. && found > 0. && std::abs(found - duration) > 3.) {
+				const auto ratio = found / duration;
+				if (ratio > 0.55 && ratio < 1.7) {
+					// A sped up / slowed version: stretch the timeline.
+					lrc = ScaleLrc(lrc, duration / found);
+				}
+			}
+			WriteText(CachePath(track, u".lrc"_q), lrc);
+			QFile::remove(CachePath(track, u".none2"_q));
+			if (Current().track.key == track.key) {
+				Load(track.document);
+			}
+			box->closeBox();
+		};
+		const auto search = [=] {
+			const auto text = field->getLastText().trimmed();
+			if (text.isEmpty()) {
+				field->showError();
+				return;
+			}
+			auto &state = Current();
+			if (!state.network) {
+				state.network = std::make_unique<QNetworkAccessManager>();
+			}
+			status->setText(QString::fromUtf8("Ищу…"));
+			results->clear();
+			auto url = QUrl(u"https://lrclib.net/api/search"_q);
+			auto query = QUrlQuery();
+			query.addQueryItem(u"q"_q, text);
+			url.setQuery(query);
+			const auto reply = state.network->get(MakeRequest(url));
+			QObject::connect(reply, &QNetworkReply::finished, [=] {
+				reply->deleteLater();
+				if (!*alive) {
+					return;
+				}
+				if (reply->error() != QNetworkReply::NoError) {
+					status->setText(QString::fromUtf8(
+						"Не получилось подключиться к сайту текстов. Проверь интернет."));
+					return;
+				}
+				const auto list = QJsonDocument::fromJson(reply->readAll()).array();
+				auto shown = 0;
+				for (const auto &value : list) {
+					const auto object = value.toObject();
+					const auto synced = object.value(u"syncedLyrics"_q).toString();
+					if (synced.isEmpty() || shown >= 15) {
+						continue;
+					}
+					const auto seconds = object.value(u"duration"_q).toDouble();
+					const auto label = u"%1 — %2  ·  %3:%4"_q
+						.arg(object.value(u"artistName"_q).toString())
+						.arg(object.value(u"trackName"_q).toString())
+						.arg(int(seconds) / 60)
+						.arg(int(seconds) % 60, 2, 10, QChar('0'));
+					const auto button = results->add(
+						object_ptr<Ui::LinkButton>(
+							results,
+							(label.size() > 70) ? (label.left(69) + QChar(0x2026)) : label),
+						style::margins(0, 6, 0, 6));
+					button->setClickedCallback([=] { apply(synced, seconds); });
+					++shown;
+				}
+				const auto mine = track.duration / 1000;
+				status->setText(shown
+					? QString::fromUtf8("Выбери вариант. Твой трек длится %1:%2 — ближе по длине обычно точнее.")
+						.arg(mine / 60)
+						.arg(mine % 60, 2, 10, QChar('0'))
+					: QString::fromUtf8("Ничего с таймингами не нашлось. Попробуй написать иначе."));
+				results->resizeToWidth(box->width()
+					- st::boxRowPadding.left()
+					- st::boxRowPadding.right());
+			});
+		};
+		field->submits() | rpl::on_next([=](Qt::KeyboardModifiers) {
+			search();
+		}, field->lifetime());
+		box->setFocusCallback([=] { field->setFocusFast(); });
+		box->addButton(rpl::single(QString::fromUtf8("Искать")), search);
+		box->addLeftButton(rpl::single(QString::fromUtf8("Закрыть")), [=] {
+			box->closeBox();
+		});
+	}));
+}
+
 void FillSongMenu(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Window::SessionController*> controller) {
@@ -1560,6 +1669,10 @@ void FillSongMenu(
 			QString::fromUtf8("Сдвиг текста песни…"),
 			[=] { ShowOffsetBox(controller); },
 			&st::menuIconTimer);
+		menu->addAction(
+			QString::fromUtf8("Найти текст…"),
+			[=] { ShowSearchBox(controller); },
+			&st::menuIconSearch);
 		menu->addAction(
 			QString::fromUtf8("Написать / исправить текст…"),
 			[=] { ShowSyncEditor(controller); },
