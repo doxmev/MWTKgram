@@ -304,8 +304,14 @@ void VisualsWidget::tick() {
 		_scene.setPulse(_pulse);
 		_scene.advance(dt);
 		if (_seasonsEnabled) {
-			_seasons.advance(dt);
-			dirty += _seasons.takeDirtyRegion();
+			// Leaves and snow fly over the chats, so every move repaints
+			// what is under them: 20 frames a second are enough.
+			_seasonsDt += dt;
+			if (_seasonsDt >= 0.05) {
+				_seasons.advance(_seasonsDt);
+				_seasonsDt = 0.;
+				dirty += _seasons.takeDirtyRegion();
+			}
 		}
 		dirty += _scene.takeDirtyRegion();
 	}

@@ -76,6 +76,7 @@ private:
 	Scene _scene;
 	Seasons _seasons;
 	bool _seasonsEnabled = false;
+	float64 _seasonsDt = 0.;
 	base::Timer _timer;
 	crl::time _lastTick = 0;
 	bool _running = false;

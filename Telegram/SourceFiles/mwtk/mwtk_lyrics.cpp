@@ -50,6 +50,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QTextEdit>
 
 #include <cmath>
 #include <optional>
@@ -220,7 +221,7 @@ void Load(DocumentData *document) {
 		}
 	}
 	// 3. LRCLIB, unless we recently learned it has nothing.
-	const auto none = CachePath(state.track, u".none"_q);
+	const auto none = CachePath(state.track, u".none2"_q);
 	if (QFile::exists(none)) {
 		const auto age = QFileInfo(none).lastModified().secsTo(
 			QDateTime::currentDateTime());
@@ -243,9 +244,65 @@ void Load(DocumentData *document) {
 	return request;
 }
 
-void FinishFetch(const TrackInfo &info, int generation, const QString &lrc) {
+// 1 sped up, -1 slowed, 0 normal.
+[[nodiscard]] int SpeedOf(const QString &title) {
+	const auto t = title.toLower();
+	if (t.contains(u"sped"_q)
+		|| t.contains(u"speed up"_q)
+		|| t.contains(u"nightcore"_q)
+		|| t.contains(QString::fromUtf8("ускор"))) {
+		return 1;
+	} else if (t.contains(u"slow"_q) || t.contains(QString::fromUtf8("замедл"))) {
+		return -1;
+	}
+	return 0;
+}
+
+// "Song (sped up)", "Song [Official Audio]", "Song feat. X" -> "Song".
+[[nodiscard]] QString CleanTitle(const QString &title) {
+	static const auto variant = QRegularExpression(
+		uR"(\s*[(\[][^)\]]*(sped|speed|slow|nightcore|remix|ver|version|edit|prod|feat|ft\.|lyric|audio|official|cover|instrumental|mood|tiktok|reverb|bass|8d)[^)\]]*[)\]])"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	static const auto feat = QRegularExpression(
+		uR"(\s+(feat\.?|ft\.?)\s.*$)"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	static const auto dash = QRegularExpression(
+		uR"(\s*-\s*(sped up|slowed|nightcore).*$)"_q,
+		QRegularExpression::CaseInsensitiveOption);
+	auto result = title;
+	result.replace(variant, QString());
+	result.replace(feat, QString());
+	result.replace(dash, QString());
+	result = result.trimmed();
+	return result.isEmpty() ? title.trimmed() : result;
+}
+
+[[nodiscard]] QString ScaleLrc(const QString &lrc, double factor) {
+	if (std::abs(factor - 1.) < 0.01) {
+		return lrc;
+	}
+	auto lines = ParseLrc(lrc);
+	for (auto &line : lines) {
+		line.at = crl::time(std::round(line.at * factor));
+		line.end = crl::time(std::round(line.end * factor));
+		for (auto &time : line.wordTimes) {
+			time = crl::time(std::round(time * factor));
+		}
+	}
+	return SerializeLrc(lines);
+}
+
+void FinishFetch(
+		const TrackInfo &info,
+		int generation,
+		const QString &lrc,
+		bool reached) {
 	if (lrc.isEmpty()) {
-		WriteText(CachePath(info, u".none"_q), QString());
+		if (reached) {
+			// The site answered and has nothing. A network error is not
+			// remembered: next time the song is played we try again.
+			WriteText(CachePath(info, u".none2"_q), QString());
+		}
 		SetLines(generation, {});
 		return;
 	}
@@ -253,43 +310,95 @@ void FinishFetch(const TrackInfo &info, int generation, const QString &lrc) {
 	SetLines(generation, ParseLrc(lrc));
 }
 
-void Search(const TrackInfo &info, int generation) {
+[[nodiscard]] QString PickBest(const QJsonArray &list, const TrackInfo &info) {
+	const auto speed = SpeedOf(info.title);
+	const auto title = CleanTitle(info.title).toLower();
+	const auto artist = info.performer.trimmed().toLower();
+	const auto duration = info.duration / 1000.;
+	auto best = QString();
+	auto bestScore = 1e9;
+	auto bestFactor = 1.;
+	for (const auto &value : list) {
+		const auto object = value.toObject();
+		const auto synced = object.value(u"syncedLyrics"_q).toString();
+		if (synced.isEmpty()) {
+			continue;
+		}
+		const auto itemTitle = object.value(u"trackName"_q).toString().toLower();
+		const auto itemArtist = object.value(u"artistName"_q).toString().toLower();
+		if (!itemTitle.contains(title) && !title.contains(itemTitle)) {
+			continue;
+		}
+		const auto penalty = (artist.isEmpty()
+			|| itemArtist.contains(artist)
+			|| artist.contains(itemArtist)) ? 0. : 50.;
+		const auto d = object.value(u"duration"_q).toDouble();
+		auto factor = 1.;
+		auto score = 0.;
+		if (duration <= 0. || d <= 0.) {
+			score = 30.;
+		} else if (std::abs(d - duration) <= 3.) {
+			score = std::abs(d - duration);
+		} else if (speed != 0) {
+			// Sped up / slowed edit: same words on a stretched timeline.
+			const auto ratio = d / duration;
+			const auto fits = (speed > 0)
+				? (ratio > 1.05 && ratio < 1.7)
+				: (ratio > 0.55 && ratio < 0.95);
+			if (!fits) {
+				continue;
+			}
+			factor = duration / d;
+			score = 5. + std::abs(ratio - (speed > 0 ? 1.25 : 0.8)) * 20.;
+		} else if (std::abs(d - duration) <= 9.) {
+			score = 10. + std::abs(d - duration);
+		} else {
+			continue;
+		}
+		score += penalty;
+		if (score < bestScore) {
+			bestScore = score;
+			best = synced;
+			bestFactor = factor;
+		}
+	}
+	return best.isEmpty() ? best : ScaleLrc(best, bestFactor);
+}
+
+// Three searches, from the most exact to the widest.
+void Search(const TrackInfo &info, int generation, int step, bool reached) {
 	auto &state = Current();
+	const auto clean = CleanTitle(info.title);
 	auto url = QUrl(u"https://lrclib.net/api/search"_q);
 	auto query = QUrlQuery();
-	query.addQueryItem(u"track_name"_q, info.title);
-	if (!info.performer.isEmpty()) {
-		query.addQueryItem(u"artist_name"_q, info.performer);
+	if (step == 0) {
+		query.addQueryItem(u"track_name"_q, clean);
+		if (!info.performer.isEmpty()) {
+			query.addQueryItem(u"artist_name"_q, info.performer);
+		}
+	} else if (step == 1) {
+		query.addQueryItem(u"q"_q, (info.performer + ' ' + clean).trimmed());
+	} else {
+		query.addQueryItem(u"q"_q, clean);
 	}
 	url.setQuery(query);
 	const auto reply = state.network->get(MakeRequest(url));
 	QObject::connect(reply, &QNetworkReply::finished, [=] {
 		reply->deleteLater();
+		if (Current().generation != generation) {
+			return;
+		}
+		auto answered = reached;
 		auto lrc = QString();
 		if (reply->error() == QNetworkReply::NoError) {
-			const auto list = QJsonDocument::fromJson(reply->readAll()).array();
-			auto best = -1.;
-			for (const auto &value : list) {
-				const auto object = value.toObject();
-				const auto synced = object.value(u"syncedLyrics"_q).toString();
-				if (synced.isEmpty()) {
-					continue;
-				}
-				const auto seconds = object.value(u"duration"_q).toDouble();
-				const auto diff = info.duration
-					? std::abs(seconds - info.duration / 1000.)
-					: 0.;
-				if (diff > 8.) {
-					continue;
-				}
-				const auto score = 100. - diff;
-				if (score > best) {
-					best = score;
-					lrc = synced;
-				}
-			}
+			answered = true;
+			lrc = PickBest(QJsonDocument::fromJson(reply->readAll()).array(), info);
 		}
-		FinishFetch(info, generation, lrc);
+		if (lrc.isEmpty() && step < 2) {
+			Search(info, generation, step + 1, answered);
+			return;
+		}
+		FinishFetch(info, generation, lrc, answered);
 	});
 }
 
@@ -298,9 +407,14 @@ void FetchOnline(const TrackInfo &info, int generation) {
 	if (!state.network) {
 		state.network = std::make_unique<QNetworkAccessManager>();
 	}
+	if (SpeedOf(info.title) != 0) {
+		// The exact lookup needs the original length; go straight to search.
+		Search(info, generation, 0, false);
+		return;
+	}
 	auto url = QUrl(u"https://lrclib.net/api/get"_q);
 	auto query = QUrlQuery();
-	query.addQueryItem(u"track_name"_q, info.title);
+	query.addQueryItem(u"track_name"_q, CleanTitle(info.title));
 	query.addQueryItem(u"artist_name"_q, info.performer);
 	if (info.duration > 0) {
 		query.addQueryItem(
@@ -314,16 +428,20 @@ void FetchOnline(const TrackInfo &info, int generation) {
 		if (Current().generation != generation) {
 			return;
 		}
+		auto reached = false;
 		if (reply->error() == QNetworkReply::NoError) {
+			reached = true;
 			const auto object = QJsonDocument::fromJson(
 				reply->readAll()).object();
 			const auto synced = object.value(u"syncedLyrics"_q).toString();
 			if (!synced.isEmpty()) {
-				FinishFetch(info, generation, synced);
+				FinishFetch(info, generation, synced, true);
 				return;
 			}
+		} else if (reply->error() == QNetworkReply::ContentNotFoundError) {
+			reached = true;
 		}
-		Search(info, generation);
+		Search(info, generation, 0, reached);
 	});
 }
 
@@ -1015,7 +1133,8 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 	_coverMode = mode;
 
 	// Sway and a soft pulse on the beat.
-	const auto level = _playing ? ::Media::Player::mixer()->songLevel() : 0.;
+	const auto mixer = ::Media::Player::mixer();
+	const auto level = (_playing && mixer) ? mixer->songLevel() : 0.;
 	_coverBeat = std::max(level, _coverBeat - dt * 2.5);
 	const auto t = frame / 1000.;
 	const auto angle = std::sin(t * 0.8) * 5.;
@@ -1289,92 +1408,134 @@ void ShowOffsetBox(not_null<Window::SessionController*> controller) {
 	}));
 }
 
+namespace {
+
+[[nodiscard]] QString FormatTime(crl::time ms) {
+	ms = std::max(ms, crl::time(0));
+	return u"%1:%2.%3"_q
+		.arg(ms / 60000)
+		.arg((ms / 1000) % 60, 2, 10, QChar('0'))
+		.arg((ms % 1000) / 10, 2, 10, QChar('0'));
+}
+
+// Lines as the user edits them: "0:12.50 text", word times as "<0:13>word".
+[[nodiscard]] QString HumanFromLines(const std::vector<Line> &lines) {
+	auto result = QString();
+	for (const auto &line : lines) {
+		auto text = line.text;
+		const auto words = line.text.split(' ', Qt::SkipEmptyParts);
+		if (!line.wordTimes.empty()
+			&& line.wordTimes.size() == size_t(words.size())) {
+			text.clear();
+			for (auto i = 0; i != words.size(); ++i) {
+				if (i) {
+					text += ' ' + ('<' + FormatTime(line.wordTimes[i]) + '>');
+				}
+				text += words[i];
+			}
+		}
+		result += FormatTime(line.at) + ' ' + text + '\n';
+	}
+	return result;
+}
+
+struct HumanParse {
+	QString lrc;
+	int lines = 0;
+	int bad = 0;
+};
+
+[[nodiscard]] HumanParse LrcFromHuman(const QString &text) {
+	static const auto head = QRegularExpression(
+		uR"(^\[?(\d{1,3}):(\d{1,2})(?:[.,](\d{1,3}))?\]?\s*(.*)$)"_q);
+	static const auto comma = QRegularExpression(
+		uR"(<(\d{1,3}):(\d{1,2}),(\d{1,3})>)"_q);
+	auto result = HumanParse();
+	for (const auto &raw : text.split('\n')) {
+		const auto line = raw.trimmed();
+		if (line.isEmpty()) {
+			continue;
+		}
+		const auto m = head.match(line);
+		if (!m.hasMatch() || m.captured(4).trimmed().isEmpty()) {
+			++result.bad;
+			continue;
+		}
+		const auto time = m.captured(1)
+			+ ':'
+			+ m.captured(2).rightJustified(2, '0')
+			+ (m.captured(3).isEmpty() ? QString() : ('.' + m.captured(3)));
+		auto rest = m.captured(4).trimmed();
+		rest.replace(comma, u"<\\1:\\2.\\3>"_q);
+		if (rest.contains('<') && !rest.startsWith('<')) {
+			// The first word starts with the line itself.
+			rest = '<' + time + '>' + rest;
+		}
+		result.lrc += '[' + time + ']' + rest + '\n';
+		++result.lines;
+	}
+	return result;
+}
+
+[[nodiscard]] crl::time PlayingPosition() {
+	const auto playing = ::Media::Player::instance()->getState(
+		AudioMsgId::Type::Song);
+	const auto frequency = std::max(playing.frequency, 1);
+	return crl::time(playing.position * 1000 / frequency);
+}
+
+} // namespace
+
 void ShowSyncEditor(not_null<Window::SessionController*> controller) {
 	const auto &state = Current();
 	if (!state.track.document) {
 		return;
 	}
 	const auto track = state.track;
+	const auto existing = HumanFromLines(state.lines);
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(QString::fromUtf8("Синхронизация текста")));
+		box->setTitle(rpl::single(QString::fromUtf8("Текст песни")));
 		box->setWidth(st::boxWideWidth);
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			rpl::single(QString::fromUtf8(
-				"1. Вставь текст песни, каждая строчка с новой строки.\n"
-				"2. Включи трек сначала и нажимай «Отметить» в начале каждой строчки.")),
+				"Каждая строчка: время, потом текст.\n"
+				"0:12 Пообещай мне\n"
+				"0:15.5 Что ты будешь рядом\n"
+				"Время отдельного слова: 0:20 Я <0:21>тебя <0:22>жду\n"
+				"«Время сейчас» вставляет текущую секунду трека туда, где курсор.")),
 			st::boxLabel));
 		const auto field = box->addRow(object_ptr<Ui::InputField>(
 			box,
 			st::newGroupDescription,
 			Ui::InputField::Mode::MultiLine,
-			rpl::single(QString::fromUtf8("Текст песни"))));
+			rpl::single(QString::fromUtf8("0:12 Первая строчка")),
+			existing));
 		field->setMaxLength(20000);
-		struct Progress {
-			QStringList texts;
-			std::vector<Line> lines;
-			int next = -1;
-		};
-		const auto progress = std::make_shared<Progress>();
 		const auto status = box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			QString(),
 			st::boxDividerLabel));
-		const auto update = [=] {
-			if (progress->next < 0) {
-				status->setText(QString());
-			} else if (progress->next < progress->texts.size()) {
-				status->setText(QString::fromUtf8("Строка %1 из %2: %3")
-					.arg(progress->next + 1)
-					.arg(progress->texts.size())
-					.arg(progress->texts[progress->next]));
-			} else {
-				status->setText(QString::fromUtf8("Готово! Нажми «Сохранить»."));
-			}
-		};
-		const auto mark = [=] {
-			if (progress->next < 0) {
-				progress->texts.clear();
-				for (const auto &line : field->getLastText().split('\n')) {
-					if (!line.trimmed().isEmpty()) {
-						progress->texts.push_back(line.trimmed());
-					}
-				}
-				progress->lines.clear();
-				progress->next = 0;
-				if (progress->texts.isEmpty()) {
-					progress->next = -1;
-					field->showError();
-					return;
-				}
-				update();
-				return;
-			}
-			if (progress->next >= progress->texts.size()) {
-				return;
-			}
-			const auto playing = ::Media::Player::instance()->getState(
-				AudioMsgId::Type::Song);
-			const auto frequency = std::max(playing.frequency, 1);
-			progress->lines.push_back({
-				.at = crl::time(playing.position * 1000 / frequency),
-				.text = progress->texts[progress->next],
-			});
-			++progress->next;
-			update();
-		};
-		box->addButton(rpl::single(QString::fromUtf8("Отметить")), mark);
+		box->setFocusCallback([=] { field->setFocusFast(); });
 		box->addButton(rpl::single(QString::fromUtf8("Сохранить")), [=] {
-			if (progress->lines.empty()) {
+			const auto parsed = LrcFromHuman(field->getLastText());
+			if (!parsed.lines) {
+				status->setText(QString::fromUtf8(
+					"Нет ни одной строчки со временем. Пример: 0:12 Текст"));
+				field->showError();
 				return;
 			}
-			const auto lrc = SerializeLrc(progress->lines);
-			WriteText(CachePath(track, u".lrc"_q), lrc);
-			QFile::remove(CachePath(track, u".none"_q));
+			WriteText(CachePath(track, u".lrc"_q), parsed.lrc);
+			QFile::remove(CachePath(track, u".none2"_q));
 			if (Current().track.key == track.key) {
 				Load(track.document);
 			}
 			box->closeBox();
+		});
+		box->addButton(rpl::single(QString::fromUtf8("Время сейчас")), [=] {
+			field->rawTextEdit()->insertPlainText(
+				FormatTime(PlayingPosition()) + ' ');
+			field->setFocusFast();
 		});
 		box->addLeftButton(rpl::single(QString::fromUtf8("Отмена")), [=] {
 			box->closeBox();
@@ -1400,7 +1561,7 @@ void FillSongMenu(
 			[=] { ShowOffsetBox(controller); },
 			&st::menuIconTimer);
 		menu->addAction(
-			QString::fromUtf8("Синхронизировать текст…"),
+			QString::fromUtf8("Написать / исправить текст…"),
 			[=] { ShowSyncEditor(controller); },
 			&st::menuIconEdit);
 	}

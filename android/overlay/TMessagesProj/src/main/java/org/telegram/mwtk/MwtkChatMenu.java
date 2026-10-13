@@ -128,7 +128,7 @@ public final class MwtkChatMenu {
                     : "Спрятать чаты (текст песни)");
                 options.add(OPTION_HIDE_CHATS);
                 icons.add(R.drawable.msg_viewintopic);
-                items.add("Синхронизировать текст");
+                items.add("Написать / исправить текст");
                 options.add(OPTION_SYNC_LYRICS);
                 icons.add(R.drawable.msg_edit);
                 items.add("Сдвиг текста песни");

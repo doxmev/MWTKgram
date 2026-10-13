@@ -19,7 +19,7 @@ namespace Mwtk {
 namespace {
 
 constexpr auto kPi = 3.14159265358979323846;
-constexpr auto kFlakes = 56;
+constexpr auto kFlakes = 30;
 
 [[nodiscard]] std::mt19937 &Random() {
 	static auto result = std::mt19937(2024);

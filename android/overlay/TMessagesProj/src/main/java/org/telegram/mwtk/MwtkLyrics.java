@@ -51,6 +51,8 @@ public final class MwtkLyrics {
         public long at;
         public long end;
         public String text;
+        /** Start time of each word (enhanced LRC "<m:ss>word"), or null. */
+        public long[] words;
     }
 
     private static final long NOT_FOUND_RETRY = 7L * 24 * 3600 * 1000;
@@ -67,7 +69,7 @@ public final class MwtkLyrics {
 
     private static final Pattern TAG = Pattern.compile("^\\[(\\d{1,3}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]");
     private static final Pattern OFFSET = Pattern.compile("\\[offset:\\s*([+-]?\\d+)\\s*\\]", Pattern.CASE_INSENSITIVE);
-    private static final Pattern WORD_TAG = Pattern.compile("<\\d{1,3}:\\d{1,2}(?:[.:]\\d{1,3})?>");
+    private static final Pattern WORD_TAG = Pattern.compile("<(\\d{1,3}):(\\d{1,2})(?:[.:](\\d{1,3}))?>");
 
     private static long toMs(Matcher m) {
         long minutes = Long.parseLong(m.group(1));
@@ -113,11 +115,50 @@ public final class MwtkLyrics {
             if (times.isEmpty()) {
                 continue;
             }
-            String clean = WORD_TAG.matcher(rest).replaceAll("").trim().replaceAll("\\s+", " ");
+            // Word times: every word after a <m:ss> tag starts at that time.
+            ArrayList<Long> wordTimes = new ArrayList<>();
+            StringBuilder cleanBuilder = new StringBuilder();
+            Matcher wm = WORD_TAG.matcher(rest);
+            int last = 0;
+            Long pending = null;
+            boolean tagged = false;
+            while (wm.find()) {
+                tagged = true;
+                String chunk = rest.substring(last, wm.start());
+                if (pending != null) {
+                    for (String w : chunk.trim().split("\\s+")) {
+                        if (!w.isEmpty()) {
+                            wordTimes.add(pending);
+                        }
+                    }
+                }
+                cleanBuilder.append(chunk).append(' ');
+                pending = toMs(wm);
+                last = wm.end();
+            }
+            String tail = rest.substring(last);
+            if (pending != null) {
+                for (String w : tail.trim().split("\\s+")) {
+                    if (!w.isEmpty()) {
+                        wordTimes.add(pending);
+                    }
+                }
+            }
+            cleanBuilder.append(tail);
+            String clean = cleanBuilder.toString().trim().replaceAll("\\s+", " ");
+            int wordCount = clean.isEmpty() ? 0 : clean.split(" ").length;
+            long[] words = null;
+            if (tagged && wordTimes.size() == wordCount) {
+                words = new long[wordCount];
+                for (int i = 0; i < wordCount; i++) {
+                    words[i] = Math.max(0, wordTimes.get(i) - offset);
+                }
+            }
             for (long at : times) {
                 Line l = new Line();
                 l.at = Math.max(0, at - offset);
                 l.text = clean;
+                l.words = words;
                 result.add(l);
             }
         }
@@ -132,8 +173,70 @@ public final class MwtkLyrics {
     public static String serialize(ArrayList<Line> list) {
         StringBuilder b = new StringBuilder();
         for (Line l : list) {
-            b.append(String.format(java.util.Locale.US, "[%02d:%02d.%02d]%s\n",
-                l.at / 60000, (l.at / 1000) % 60, (l.at % 1000) / 10, l.text));
+            b.append('[').append(formatTime(l.at)).append(']').append(textWithWordTimes(l, true)).append('\n');
+        }
+        return b.toString();
+    }
+
+    static String formatTime(long ms) {
+        ms = Math.max(0, ms);
+        return String.format(java.util.Locale.US, "%d:%02d.%02d", ms / 60000, (ms / 1000) % 60, (ms % 1000) / 10);
+    }
+
+    private static String textWithWordTimes(Line l) {
+        return textWithWordTimes(l, false);
+    }
+
+    private static String textWithWordTimes(Line l, boolean firstToo) {
+        String[] parts = l.text.split(" ");
+        if (l.words == null || l.words.length != parts.length) {
+            return l.text;
+        }
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                b.append(' ');
+            }
+            if (i > 0 || firstToo) {
+                b.append('<').append(formatTime(l.words[i])).append('>');
+            }
+            b.append(parts[i]);
+        }
+        return b.toString();
+    }
+
+    private static final Pattern HUMAN_HEAD = Pattern.compile("^\\[?(\\d{1,3}):(\\d{1,2})(?:[.,](\\d{1,3}))?\\]?\\s*(.*)$");
+    private static final Pattern HUMAN_COMMA = Pattern.compile("<(\\d{1,3}):(\\d{1,2}),(\\d{1,3})>");
+
+    /** "0:12 text" lines (word times as "<0:13>word") to LRC; null when nothing is timed. */
+    static String lrcFromHuman(String text) {
+        StringBuilder lrc = new StringBuilder();
+        int count = 0;
+        for (String raw : text.split("\n")) {
+            String line = raw.trim();
+            if (line.isEmpty()) {
+                continue;
+            }
+            Matcher m = HUMAN_HEAD.matcher(line);
+            if (!m.matches() || m.group(4).trim().isEmpty()) {
+                continue;
+            }
+            String seconds = m.group(2).length() == 1 ? "0" + m.group(2) : m.group(2);
+            String time = m.group(1) + ":" + seconds + (m.group(3) == null ? "" : "." + m.group(3));
+            String rest = HUMAN_COMMA.matcher(m.group(4).trim()).replaceAll("<$1:$2.$3>");
+            if (rest.contains("<") && !rest.startsWith("<")) {
+                rest = "<" + time + ">" + rest;
+            }
+            lrc.append('[').append(time).append(']').append(rest).append('\n');
+            count++;
+        }
+        return count == 0 ? null : lrc.toString();
+    }
+
+    static String humanFromLines(ArrayList<Line> list) {
+        StringBuilder b = new StringBuilder();
+        for (Line l : list) {
+            b.append(formatTime(l.at)).append(' ').append(textWithWordTimes(l)).append('\n');
         }
         return b.toString();
     }
@@ -580,9 +683,14 @@ public final class MwtkLyrics {
             for (int i = 0; i < texts.length; i++) {
                 Word w = new Word();
                 w.text = texts[i];
-                w.start = (long) at;
-                at += span * (texts[i].length() + 1) / total;
-                w.end = (long) at;
+                if (line.words != null && line.words.length == texts.length) {
+                    w.start = line.words[i];
+                    w.end = i + 1 < texts.length ? line.words[i + 1] : line.end;
+                } else {
+                    w.start = (long) at;
+                    at += span * (texts[i].length() + 1) / total;
+                    w.end = (long) at;
+                }
                 w.out = line.end + (layout == 2 ? 0 : (long) (350f * i / texts.length));
                 w.phase = r.nextFloat() * 6.28f;
                 double angle = r.nextFloat() * 6.28;
@@ -814,59 +922,57 @@ public final class MwtkLyrics {
         TextView hint = new TextView(context);
         hint.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         hint.setTextSize(14);
-        hint.setText("1. Вставь текст песни, каждая строчка с новой строки.\n2. Включи трек с начала и нажимай «Отметить» в начале каждой строчки.");
+        hint.setText("Каждая строчка: время, потом текст.\n"
+            + "0:12 Пообещай мне\n"
+            + "0:15.5 Что ты будешь рядом\n"
+            + "Время отдельного слова: 0:20 Я <0:21>тебя <0:22>жду\n"
+            + "«Время сейчас» вставляет текущую секунду трека туда, где курсор.");
         box.addView(hint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 8));
-        EditText field = MwtkUi.field(context, "", "Текст песни", true, false);
+        String existing = "";
+        if (key.equals(currentKey) && !lines.isEmpty()) {
+            existing = humanFromLines(lines);
+        } else {
+            String cached = MwtkStore.readText(cacheName(key, ".lrc"));
+            if (!cached.isEmpty()) {
+                existing = humanFromLines(parse(cached));
+            }
+        }
+        EditText field = MwtkUi.field(context, existing, "0:12 Первая строчка", true, false);
+        field.setMinLines(6);
+        field.setMaxLines(14);
+        field.setVerticalScrollBarEnabled(true);
         box.addView(field, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 8));
         TextView status = new TextView(context);
-        status.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
-        status.setTextSize(15);
+        status.setTextColor(Theme.getColor(Theme.key_text_RedRegular));
+        status.setTextSize(14);
         box.addView(status, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 4));
-        final ArrayList<String> texts = new ArrayList<>();
-        final ArrayList<Line> marked = new ArrayList<>();
         AlertDialog.Builder builder = new AlertDialog.Builder(context);
-        builder.setTitle("Синхронизация текста");
+        builder.setTitle("Текст песни");
         builder.setView(box);
-        builder.setPositiveButton("Отметить", null);
-        builder.setNeutralButton("Сохранить", null);
+        builder.setPositiveButton("Сохранить", null);
+        builder.setNeutralButton("Время сейчас", null);
         builder.setNegativeButton("Отмена", null);
         AlertDialog dialog = builder.create();
         fragment.showDialog(dialog);
-        View markButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
-        View saveButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
-        if (markButton != null) {
-            markButton.setOnClickListener(v -> {
-                if (texts.isEmpty()) {
-                    for (String l : field.getText().toString().split("\n")) {
-                        if (!l.trim().isEmpty()) {
-                            texts.add(l.trim());
-                        }
-                    }
-                    if (texts.isEmpty()) {
-                        return;
-                    }
-                    field.setEnabled(false);
-                    status.setText("Строка 1 из " + texts.size() + ": " + texts.get(0));
-                    return;
-                }
-                if (marked.size() >= texts.size()) {
-                    return;
-                }
-                Line l = new Line();
-                l.at = Math.max(0, MediaController.getInstance().getCurrentPosition());
-                l.text = texts.get(marked.size());
-                marked.add(l);
-                status.setText(marked.size() < texts.size()
-                    ? "Строка " + (marked.size() + 1) + " из " + texts.size() + ": " + texts.get(marked.size())
-                    : "Готово! Нажми «Сохранить».");
+        View saveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+        View nowButton = dialog.getButton(AlertDialog.BUTTON_NEUTRAL);
+        if (nowButton != null) {
+            nowButton.setOnClickListener(v -> {
+                String stamp = formatTime(MediaController.getInstance().getCurrentPosition()) + " ";
+                int start = Math.max(field.getSelectionStart(), 0);
+                int end = Math.max(field.getSelectionEnd(), 0);
+                field.getText().replace(Math.min(start, end), Math.max(start, end), stamp);
+                field.requestFocus();
             });
         }
         if (saveButton != null) {
             saveButton.setOnClickListener(v -> {
-                if (marked.isEmpty()) {
+                String lrc = lrcFromHuman(field.getText().toString());
+                if (lrc == null) {
+                    status.setText("Нет ни одной строчки со временем. Пример: 0:12 Текст");
                     return;
                 }
-                MwtkStore.writeText(cacheName(key, ".lrc"), serialize(marked));
+                MwtkStore.writeText(cacheName(key, ".lrc"), lrc);
                 MwtkStore.file(cacheName(key, ".none2")).delete();
                 if (key.equals(currentKey)) {
                     currentKey = null;
