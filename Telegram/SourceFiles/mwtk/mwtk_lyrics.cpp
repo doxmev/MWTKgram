@@ -10,6 +10,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/options.h"
 #include "base/timer.h"
 #include "data/data_document.h"
+#include "data/data_document_media.h"
+#include "data/data_file_origin.h"
+#include "ui/image/image.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
 #include "mwtk/mwtk_options.h"
@@ -42,6 +45,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QFontDatabase>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
+#include <QtGui/QPainterPath>
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
@@ -454,10 +458,25 @@ private:
 	void shatter(const Word &word, QPointF at);
 	void paintWord(QPainter &p, const Word &word, crl::time now);
 
+	// "Hide chats" mode: the song cover sways to the music and the lyrics
+	// play under it or beside it; the side changes every few lines.
+	[[nodiscard]] int coverModeFor(int index) const;
+	[[nodiscard]] QRectF coverTarget(int mode) const;
+	[[nodiscard]] QRectF lyricsArea(int index) const;
+	void paintCover(QPainter &p, crl::time now);
+	void resetCover();
+
 	base::Timer _timer;
 	std::vector<LineLayout> _layouts;
 	std::vector<Particle> _particles;
 	DocumentData *_document = nullptr;
+	FullMsgId _contextId;
+	std::shared_ptr<Data::DocumentMedia> _coverMedia;
+	QImage _cover;
+	QRectF _coverRect;
+	int _coverMode = -1;
+	crl::time _coverFrame = 0;
+	float64 _coverBeat = 0.;
 	crl::time _statePosition = 0;
 	crl::time _stateAt = 0;
 	bool _playing = false;
@@ -499,6 +518,7 @@ LyricsWidget::LyricsWidget(QWidget *parent)
 	) | rpl::on_next([=] {
 		_playing = false;
 		_document = nullptr;
+		resetCover();
 		Load(nullptr);
 	}, lifetime());
 
@@ -542,6 +562,8 @@ void LyricsWidget::onState(const ::Media::Player::TrackState &state) {
 	const auto document = state.id.audio();
 	if (document != _document) {
 		_document = document;
+		_contextId = state.id.contextId();
+		resetCover();
 		Load(document);
 	}
 	const auto frequency = std::max(state.frequency, 1);
@@ -626,7 +648,8 @@ LineLayout LyricsWidget::layoutLine(int index) const {
 	if (texts.isEmpty()) {
 		return result;
 	}
-	const auto base = std::clamp(width() / 15., 22. * scale, 60. * scale) * size;
+	const auto area = lyricsArea(index);
+	const auto base = std::clamp(area.width() / 15., 22. * scale, 60. * scale) * size;
 
 	// Timing: enhanced LRC word times or the line split by word length.
 	auto total = 0;
@@ -657,11 +680,11 @@ LineLayout LyricsWidget::layoutLine(int index) const {
 		result.words.push_back(std::move(word));
 	}
 
-	const auto w = double(width());
-	const auto h = double(height());
-	const auto center = (layout == 2)
+	const auto w = area.width();
+	const auto h = area.height();
+	const auto center = area.topLeft() + ((layout == 2)
 		? QPointF(w / 2., h * 0.42)
-		: QPointF(w * (0.5 + (r() - 0.5) * 0.25), h * (0.40 + (r() - 0.5) * 0.18));
+		: QPointF(w * (0.5 + (r() - 0.5) * 0.25), h * (0.40 + (r() - 0.5) * 0.18)));
 
 	const auto measure = [&](Word &word, double pixelSize) {
 		word.size = pixelSize;
@@ -871,6 +894,9 @@ void LyricsWidget::paintEvent(QPaintEvent *e) {
 			rect().adjusted(0, 0, 0, -16),
 			Qt::AlignHCenter | Qt::AlignBottom,
 			QString::fromUtf8("Esc или клик — вернуть чаты"));
+		if (_enabled) {
+			paintCover(p, position());
+		}
 	}
 	if (!_enabled) {
 		return;
@@ -907,6 +933,146 @@ void LyricsWidget::paintEvent(QPaintEvent *e) {
 		}
 		p.setOpacity(1.);
 	}
+}
+
+void LyricsWidget::resetCover() {
+	_coverMedia = nullptr;
+	_cover = QImage();
+	_coverMode = -1;
+	_coverRect = QRectF();
+}
+
+int LyricsWidget::coverModeFor(int index) const {
+	// 0: cover on top, text below; 1: cover left; 2: cover right.
+	// The side changes every four lines so the eye can follow it.
+	const auto &state = Current();
+	const auto seed = uint32(qHash(state.track.key)) + uint32(index / 4) * 2654435761u;
+	return int(seed % 3u);
+}
+
+QRectF LyricsWidget::coverTarget(int mode) const {
+	const auto w = double(width());
+	const auto h = double(height());
+	const auto side = std::min(w, h) * (mode == 0 ? 0.30 : 0.38);
+	const auto center = (mode == 0)
+		? QPointF(w / 2., h * 0.27)
+		: (mode == 1)
+		? QPointF(w * 0.24, h * 0.46)
+		: QPointF(w * 0.76, h * 0.46);
+	return QRectF(center - QPointF(side / 2., side / 2.), QSizeF(side, side));
+}
+
+QRectF LyricsWidget::lyricsArea(int index) const {
+	const auto full = QRectF(rect());
+	if (!hideMode()) {
+		return full;
+	}
+	const auto w = full.width();
+	const auto h = full.height();
+	switch (coverModeFor(index)) {
+	case 0: return QRectF(w * 0.06, h * 0.50, w * 0.88, h * 0.42);
+	case 1: return QRectF(w * 0.44, h * 0.08, w * 0.53, h * 0.84);
+	default: return QRectF(w * 0.03, h * 0.08, w * 0.53, h * 0.84);
+	}
+}
+
+void LyricsWidget::paintCover(QPainter &p, crl::time now) {
+	if (!_document) {
+		return;
+	}
+	// Load the cover (the song thumbnail) once.
+	if (!_coverMedia && _document->hasThumbnail()) {
+		_coverMedia = _document->createMediaView();
+		_coverMedia->thumbnailWanted(Data::FileOrigin(_contextId));
+	}
+	if (_cover.isNull() && _coverMedia) {
+		if (const auto image = _coverMedia->thumbnail()) {
+			_cover = image->original();
+		}
+	}
+
+	// Which side: the line being sung now.
+	const auto &lines = Current().lines;
+	auto current = 0;
+	for (auto i = 0; i != int(lines.size()); ++i) {
+		if (lines[i].at <= now) {
+			current = i;
+		}
+	}
+	const auto mode = coverModeFor(current);
+	const auto target = coverTarget(mode);
+	const auto frame = crl::now();
+	const auto dt = _coverFrame ? std::min((frame - _coverFrame) / 1000., 0.1) : 1.;
+	_coverFrame = frame;
+	if (_coverRect.isEmpty() || _coverMode < 0) {
+		_coverRect = target;
+	} else {
+		const auto k = std::min(1., dt * 3.);
+		_coverRect = QRectF(
+			_coverRect.topLeft() + (target.topLeft() - _coverRect.topLeft()) * k,
+			_coverRect.size() + (target.size() - _coverRect.size()) * k);
+	}
+	_coverMode = mode;
+
+	// Sway and a soft pulse on the beat.
+	const auto level = _playing ? ::Media::Player::mixer()->songLevel() : 0.;
+	_coverBeat = std::max(level, _coverBeat - dt * 2.5);
+	const auto t = frame / 1000.;
+	const auto angle = std::sin(t * 0.8) * 5.;
+	const auto bob = std::sin(t * 1.1) * _coverRect.height() * 0.025;
+	const auto zoom = 1. + 0.05 * _coverBeat;
+	const auto accent = PaletteAt(
+		std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
+		0.).first;
+
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setRenderHint(QPainter::SmoothPixmapTransform);
+	p.translate(_coverRect.center() + QPointF(0., bob));
+	p.rotate(angle);
+	p.scale(zoom, zoom);
+	const auto half = _coverRect.width() / 2.;
+	const auto box = QRectF(-half, -half, half * 2., half * 2.);
+	const auto radius = half * 0.12;
+
+	// Glow behind the cover.
+	for (auto i = 4; i > 0; --i) {
+		auto glow = accent;
+		glow.setAlpha(int((18 + 40 * _coverBeat) / i));
+		p.setPen(Qt::NoPen);
+		p.setBrush(glow);
+		const auto grow = half * 0.05 * i;
+		p.drawRoundedRect(box.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow);
+	}
+	auto clip = QPainterPath();
+	clip.addRoundedRect(box, radius, radius);
+	p.setClipPath(clip);
+	if (!_cover.isNull()) {
+		const auto source = _cover.size();
+		const auto side = std::min(source.width(), source.height());
+		const auto crop = QRect(
+			(source.width() - side) / 2,
+			(source.height() - side) / 2,
+			side,
+			side);
+		p.drawImage(box, _cover, crop);
+	} else {
+		// No cover in the file: a dark disc with a note.
+		auto gradient = QLinearGradient(box.topLeft(), box.bottomRight());
+		gradient.setColorAt(0., accent.darker(160));
+		gradient.setColorAt(1., QColor(12, 2, 4));
+		p.fillRect(box, gradient);
+		p.setPen(QColor(255, 255, 255, 200));
+		auto font = p.font();
+		font.setPixelSize(int(half * 0.9));
+		p.setFont(font);
+		p.drawText(box, Qt::AlignCenter, QString::fromUtf8("♪"));
+	}
+	p.setClipping(false);
+	p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
+	p.setBrush(Qt::NoBrush);
+	p.drawRoundedRect(box, radius, radius);
+	p.restore();
 }
 
 void LyricsWidget::mousePressEvent(QMouseEvent *e) {
