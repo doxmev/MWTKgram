@@ -203,7 +203,7 @@ public final class MwtkLyrics {
                 deliver(gen, parse(cached));
                 return;
             }
-            File none = MwtkStore.file(cacheName(key, ".none"));
+            File none = MwtkStore.file(cacheName(key, ".none2"));
             if (none.exists() && System.currentTimeMillis() - none.lastModified() < NOT_FOUND_RETRY) {
                 return;
             }
@@ -211,8 +211,11 @@ public final class MwtkLyrics {
                 return;
             }
             String lrc = fetch(title, performer, duration);
+            if (NETWORK_ERROR.equals(lrc)) {
+                return; // try again next time the track is played
+            }
             if (lrc == null || lrc.isEmpty()) {
-                MwtkStore.writeText(cacheName(key, ".none"), "");
+                MwtkStore.writeText(cacheName(key, ".none2"), "");
                 return;
             }
             MwtkStore.writeText(cacheName(key, ".lrc"), lrc);
@@ -258,28 +261,92 @@ public final class MwtkLyrics {
         }
     }
 
+    /** Network failed (as opposed to "the site has no lyrics"): do not remember as not found. */
+    private static final String NETWORK_ERROR = "\u0000net";
+
+    private static final Pattern VARIANT = Pattern.compile(
+        "\\s*[(\\[][^)\\]]*(sped|speed|slow|nightcore|remix|ver|version|edit|prod|feat|ft\\.|lyric|audio|official|cover|instrumental|mood|tiktok|reverb|bass|8d)[^)\\]]*[)\\]]",
+        Pattern.CASE_INSENSITIVE);
+
+    /** 1 = sped up, -1 = slowed, 0 = normal. */
+    private static int speedOf(String title) {
+        String t = title.toLowerCase();
+        if (t.contains("sped") || t.contains("speed up") || t.contains("nightcore") || t.contains("ускор")) {
+            return 1;
+        }
+        if (t.contains("slow") || t.contains("замедл")) {
+            return -1;
+        }
+        return 0;
+    }
+
+    private static String cleanTitle(String title) {
+        String t = VARIANT.matcher(title).replaceAll("");
+        t = t.replaceAll("(?i)\\s+(feat\\.?|ft\\.?)\\s.*$", "");
+        t = t.replaceAll("(?i)\\s*-\\s*(sped up|slowed|nightcore).*$", "");
+        return t.trim().isEmpty() ? title.trim() : t.trim();
+    }
+
+    private static String scale(String lrc, double factor) {
+        if (Math.abs(factor - 1) < 0.01) {
+            return lrc;
+        }
+        ArrayList<Line> list = parse(lrc);
+        for (Line l : list) {
+            l.at = Math.round(l.at * factor);
+        }
+        return serialize(list);
+    }
+
     private static String fetch(String title, String performer, int duration) {
         try {
-            String t = URLEncoder.encode(title, "UTF-8");
-            String a = URLEncoder.encode(performer == null ? "" : performer, "UTF-8");
-            String body = get("https://lrclib.net/api/get?track_name=" + t + "&artist_name=" + a
-                + (duration > 0 ? "&duration=" + duration : ""));
-            if (body != null) {
-                String synced = new JSONObject(body).optString("syncedLyrics", "");
-                if (!synced.isEmpty() && !"null".equals(synced)) {
-                    return synced;
+            int speed = speedOf(title);
+            String clean = cleanTitle(title);
+            String artist = performer == null ? "" : performer.trim();
+            String t = URLEncoder.encode(clean, "UTF-8");
+            String a = URLEncoder.encode(artist, "UTF-8");
+            boolean reached = false;
+            if (speed == 0) {
+                String body = get("https://lrclib.net/api/get?track_name=" + t + "&artist_name=" + a
+                    + (duration > 0 ? "&duration=" + duration : ""));
+                if (body != null) {
+                    reached = true;
+                    String synced = new JSONObject(body).optString("syncedLyrics", "");
+                    if (!synced.isEmpty() && !"null".equals(synced)) {
+                        return synced;
+                    }
                 }
             }
-            String list = get("https://lrclib.net/api/search?track_name=" + t
-                + (performer == null || performer.isEmpty() ? "" : "&artist_name=" + a));
-            if (list == null) {
-                return null;
+            JSONArray all = new JSONArray();
+            String[] queries = {
+                "https://lrclib.net/api/search?track_name=" + t + (artist.isEmpty() ? "" : "&artist_name=" + a),
+                "https://lrclib.net/api/search?q=" + URLEncoder.encode((artist + " " + clean).trim(), "UTF-8"),
+                "https://lrclib.net/api/search?q=" + t,
+            };
+            for (String q : queries) {
+                String list = get(q);
+                if (list == null) {
+                    continue;
+                }
+                reached = true;
+                JSONArray array = new JSONArray(list);
+                for (int i = 0; i < array.length(); i++) {
+                    all.put(array.get(i));
+                }
+                if (all.length() > 0) {
+                    break;
+                }
             }
-            JSONArray array = new JSONArray(list);
+            if (!reached) {
+                return NETWORK_ERROR;
+            }
             String best = null;
-            double bestDiff = 9;
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject item = array.optJSONObject(i);
+            double bestScore = Double.MAX_VALUE;
+            double bestFactor = 1;
+            String artistLower = artist.toLowerCase();
+            String titleLower = clean.toLowerCase();
+            for (int i = 0; i < all.length(); i++) {
+                JSONObject item = all.optJSONObject(i);
                 if (item == null) {
                     continue;
                 }
@@ -287,15 +354,43 @@ public final class MwtkLyrics {
                 if (synced.isEmpty() || "null".equals(synced)) {
                     continue;
                 }
-                double diff = duration > 0 ? Math.abs(item.optDouble("duration", 0) - duration) : 0;
-                if (diff < bestDiff) {
-                    bestDiff = diff;
+                String itemTitle = item.optString("trackName", "").toLowerCase();
+                String itemArtist = item.optString("artistName", "").toLowerCase();
+                if (!itemTitle.contains(titleLower) && !titleLower.contains(itemTitle)) {
+                    continue;
+                }
+                double penalty = artistLower.isEmpty() || itemArtist.contains(artistLower) || artistLower.contains(itemArtist) ? 0 : 50;
+                double d = item.optDouble("duration", 0);
+                double factor = 1;
+                double score;
+                if (duration <= 0 || d <= 0) {
+                    score = 30;
+                } else if (Math.abs(d - duration) <= 3) {
+                    score = Math.abs(d - duration);
+                } else if (speed != 0) {
+                    // A sped up / slowed edit: same words, timeline stretched.
+                    double ratio = d / duration;
+                    boolean fits = speed > 0 ? (ratio > 1.05 && ratio < 1.7) : (ratio > 0.55 && ratio < 0.95);
+                    if (!fits) {
+                        continue;
+                    }
+                    factor = duration / d;
+                    score = 5 + Math.abs(ratio - (speed > 0 ? 1.25 : 0.8)) * 20;
+                } else if (Math.abs(d - duration) <= 9) {
+                    score = 10 + Math.abs(d - duration);
+                } else {
+                    continue;
+                }
+                score += penalty;
+                if (score < bestScore) {
+                    bestScore = score;
                     best = synced;
+                    bestFactor = factor;
                 }
             }
-            return best;
+            return best == null ? null : scale(best, bestFactor);
         } catch (Throwable e) {
-            return null;
+            return NETWORK_ERROR;
         }
     }
 
@@ -772,7 +867,7 @@ public final class MwtkLyrics {
                     return;
                 }
                 MwtkStore.writeText(cacheName(key, ".lrc"), serialize(marked));
-                MwtkStore.file(cacheName(key, ".none")).delete();
+                MwtkStore.file(cacheName(key, ".none2")).delete();
                 if (key.equals(currentKey)) {
                     currentKey = null;
                 }

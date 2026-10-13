@@ -35,8 +35,6 @@ import java.util.Random;
  */
 public final class MwtkFloating {
 
-    private static java.lang.ref.WeakReference<View> tabletBubbles;
-
     private MwtkFloating() {
     }
 
@@ -44,22 +42,9 @@ public final class MwtkFloating {
         if (fragment == null || contentView == null || fragment.getActionBar() == null) {
             return;
         }
-        FloatingView floating = new FloatingView(contentView.getContext(), fragment, list);
+        FloatingView floating = new FloatingView(contentView.getContext(), fragment, list, contentView);
         floating.setVisibility(View.GONE);
-        // Tablet mode: bubbles fly over the whole screen, not only the chat list column.
-        FrameLayout target = contentView;
-        FrameLayout root = MwtkOverlay.root();
-        if (AndroidUtilities.isTablet() && root != null && MwtkTablet.enabled()) {
-            target = root;
-        }
-        View previous = tabletBubbles != null ? tabletBubbles.get() : null;
-        if (previous != null && previous.getParent() instanceof ViewGroup) {
-            ((ViewGroup) previous.getParent()).removeView(previous);
-        }
-        if (target == root) {
-            tabletBubbles = new java.lang.ref.WeakReference<>(floating);
-        }
-        target.addView(floating, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        contentView.addView(floating, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         fragment.getActionBar().setOnLongClickListener(v -> {
             MwtkConfig.load();
             if (!MwtkConfig.effects) {
@@ -88,6 +73,7 @@ public final class MwtkFloating {
 
         private final BaseFragment fragment;
         private final View list;
+        private final FrameLayout home;
         private final ArrayList<Bubble> bubbles = new ArrayList<>();
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final TextPaint text = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -97,10 +83,11 @@ public final class MwtkFloating {
         private long lastFrame;
         private boolean active;
 
-        FloatingView(Context context, BaseFragment fragment, View list) {
+        FloatingView(Context context, BaseFragment fragment, View list, FrameLayout home) {
             super(context);
             this.fragment = fragment;
             this.list = list;
+            this.home = home;
             text.setTextAlign(Paint.Align.CENTER);
             text.setColor(0xffffffff);
             text.setTypeface(AndroidUtilities.bold());
@@ -110,6 +97,11 @@ public final class MwtkFloating {
         void toggle() {
             active = !active;
             if (active) {
+                // Tablet mode is checked at the moment of opening: over the whole
+                // screen when it is on, inside the chat list column when it is off.
+                FrameLayout root = MwtkOverlay.root();
+                boolean wholeScreen = AndroidUtilities.isTablet() && root != null && MwtkTablet.enabled();
+                moveTo(wholeScreen ? root : home);
                 // Above the chat list in drawing and touch order.
                 setTranslationZ(AndroidUtilities.dp(1000));
                 build();
@@ -129,11 +121,22 @@ public final class MwtkFloating {
                     setVisibility(GONE);
                     setTranslationZ(0);
                     release();
+                    moveTo(home);
                 }).start();
                 if (list != null) {
                     list.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(300).start();
                 }
             }
+        }
+
+        private void moveTo(FrameLayout parent) {
+            if (parent == null || getParent() == parent) {
+                return;
+            }
+            if (getParent() instanceof ViewGroup) {
+                ((ViewGroup) getParent()).removeView(this);
+            }
+            parent.addView(this, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         }
 
         private void release() {
@@ -237,6 +240,9 @@ public final class MwtkFloating {
             float gy = MwtkMotion.tiltY * AndroidUtilities.dp(900) + AndroidUtilities.dp(60);
             int w = getWidth();
             int h = getHeight();
+            if (w <= 0 || h <= 0) {
+                return; // just moved to another parent, not laid out yet
+            }
             for (Bubble b : bubbles) {
                 if (b == dragged) {
                     continue;
