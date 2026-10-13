@@ -89,11 +89,14 @@ public final class MwtkFloating {
             text.setTextAlign(Paint.Align.CENTER);
             text.setColor(0xffffffff);
             text.setTypeface(AndroidUtilities.bold());
+            setOutlineProvider(null); // no shadow from the raised Z
         }
 
         void toggle() {
             active = !active;
             if (active) {
+                // Above the chat list in drawing and touch order.
+                setTranslationZ(AndroidUtilities.dp(1000));
                 build();
                 if (!(getBackground() instanceof MwtkBackgroundDrawable)) {
                     setBackground(new MwtkBackgroundDrawable());
@@ -109,6 +112,7 @@ public final class MwtkFloating {
             } else {
                 animate().alpha(0f).setDuration(250).withEndAction(() -> {
                     setVisibility(GONE);
+                    setTranslationZ(0);
                     release();
                 }).start();
                 if (list != null) {

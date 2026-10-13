@@ -122,6 +122,9 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
             return;
         }
         MessagesController controller = MessagesController.getInstance(account);
+        if (controller.isDialogMuted(dialogId, last.getTopicId())) {
+            return; // muted chats stay silent: no banner, no fly-by
+        }
         TLObject peer = DialogObject.isUserDialog(dialogId)
             ? controller.getUser(dialogId)
             : controller.getChat(-dialogId);

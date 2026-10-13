@@ -468,7 +468,8 @@ public final class MwtkLyrics {
             float sizeK = MwtkConfig.num(MwtkConfig.LYRICS_SIZE, 100) / 100f;
             int accent = MwtkConfig.accent();
             Random r = new Random(currentKey == null ? index : currentKey.hashCode() * 31L + index);
-            float base = Math.max(AndroidUtilities.dp(22), Math.min(getWidth() / 9f, AndroidUtilities.dp(40))) * sizeK;
+            boolean wide = getWidth() > AndroidUtilities.dp(700); // tablet or landscape: use the room
+            float base = Math.max(AndroidUtilities.dp(22), Math.min(getWidth() / (wide ? 14f : 9f), AndroidUtilities.dp(wide ? 56 : 40))) * sizeK;
             int total = 0;
             for (String t : texts) {
                 total += t.length() + 1;
@@ -492,8 +493,8 @@ public final class MwtkLyrics {
             float height = getHeight();
             float cx = layout == 2 ? width / 2 : width * (0.5f + (r.nextFloat() - 0.5f) * 0.2f);
             float cy = layout == 2 ? height * 0.42f : height * (0.38f + (r.nextFloat() - 0.5f) * 0.16f);
-            // On a narrow phone screen every layout wraps into rows.
-            int perRow = layout == 1 ? 1 : 3;
+            // On a narrow phone screen every layout wraps into rows; a wide screen fits longer rows.
+            int perRow = layout == 1 ? 1 : (wide ? 6 : 3);
             float rowH = base * 1.3f;
             ArrayList<ArrayList<Word>> rows = new ArrayList<>();
             ArrayList<Word> row = new ArrayList<>();
@@ -526,7 +527,7 @@ public final class MwtkLyrics {
                 }
                 float x = cx - rowTotal / 2 + (layout == 0 ? (r.nextFloat() - 0.5f) * base : 0);
                 if (layout == 1) {
-                    x = cx - width * 0.25f + ri * base * 0.6f;
+                    x = cx - width * (wide ? 0.3f : 0.25f) + ri * base * (wide ? 1.1f : 0.6f);
                 }
                 for (Word w : words) {
                     float ww = w.dim.getWidth() - w.dim.getHeight() * 0.5f;
