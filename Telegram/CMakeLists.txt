@@ -2484,6 +2484,9 @@ if (WIN32)
     endif()
 
     target_link_options(Telegram PRIVATE /PDBPAGESIZE:8192)
+
+    # MWTKgram lyrics use QNetworkAccessManager; static Qt Network needs the DNS API.
+    target_link_libraries(Telegram PRIVATE dnsapi)
 elseif (APPLE)
     if (NOT DESKTOP_APP_USE_PACKAGED)
         target_link_libraries(Telegram PRIVATE desktop-app::external_iconv)
