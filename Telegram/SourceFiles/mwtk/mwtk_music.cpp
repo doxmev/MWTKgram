@@ -42,7 +42,14 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
+#include <QtCore/QUrlQuery>
 #include <QtGui/QLinearGradient>
+#include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkReply>
+#include <QtNetwork/QNetworkRequest>
 #include <QtGui/QMouseEvent>
 #include <QtGui/QPainter>
 #include <QtGui/QPainterPath>
@@ -892,8 +899,126 @@ void SaveAndAddToPlaylist(
 	controller->showToast(Utf("Сохраняю песню в «Избранное»…"));
 }
 
-// «Мой микс»: songs of the artists from your playlists and the one
-// playing now, mixed together.
+void GetJson(const QString &url, Fn<void(QJsonObject)> callback) {
+	// Lives until the app exits, like the lyrics network manager.
+	static const auto network = new QNetworkAccessManager();
+	auto request = QNetworkRequest(QUrl(url));
+	request.setHeader(
+		QNetworkRequest::UserAgentHeader,
+		u"MWTKgram (https://github.com/doxmev/MWTKgram)"_q);
+	request.setTransferTimeout(12000);
+	const auto reply = network->get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		callback((reply->error() == QNetworkReply::NoError)
+			? QJsonDocument::fromJson(reply->readAll()).object()
+			: QJsonObject());
+	});
+}
+
+// Similar artists from the open Deezer catalog (no key needed): for the
+// artists you listen to, their related artists and those artists' top
+// songs. Gives "artist title" queries, empty when nothing was found.
+void FindSimilarSongs(
+		std::vector<QString> seeds,
+		Fn<void(std::vector<QString>)> done) {
+	struct Similar {
+		std::vector<QString> used;
+		std::vector<QString> queries;
+		int pending = 0;
+		Fn<void(std::vector<QString>)> done;
+	};
+	const auto state = std::make_shared<Similar>();
+	state->done = std::move(done);
+	for (const auto &seed : seeds) {
+		state->used.push_back(seed.toLower());
+	}
+	const auto finishOne = [=] {
+		if (--state->pending == 0) {
+			auto result = std::move(state->queries);
+			auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+			std::shuffle(result.begin(), result.end(), random);
+			state->done(std::move(result));
+		}
+	};
+	const auto encode = [](const QString &text) {
+		return QString::fromLatin1(QUrl::toPercentEncoding(text));
+	};
+	const auto count = std::min(int(seeds.size()), 4);
+	state->pending = count;
+	for (auto i = 0; i != count; ++i) {
+		GetJson(
+			u"https://api.deezer.com/search/artist?limit=1&q="_q + encode(seeds[i]),
+			[=](QJsonObject found) {
+			const auto data = found.value(u"data"_q).toArray();
+			if (data.isEmpty()) {
+				finishOne();
+				return;
+			}
+			const auto id = QString::number(
+				qint64(data.at(0).toObject().value(u"id"_q).toDouble()));
+			++state->pending;
+			GetJson(
+				u"https://api.deezer.com/artist/"_q + id + u"/related?limit=12"_q,
+				[=](QJsonObject related) {
+				auto artists = related.value(u"data"_q).toArray();
+				auto order = std::vector<int>();
+				for (auto k = 0; k != artists.size(); ++k) {
+					order.push_back(k);
+				}
+				auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+				std::shuffle(order.begin(), order.end(), random);
+				auto taken = 0;
+				for (const auto k : order) {
+					if (taken >= 3) {
+						break;
+					}
+					const auto artist = artists.at(k).toObject();
+					const auto name = artist.value(u"name"_q).toString();
+					if (name.isEmpty()
+						|| ranges::contains(state->used, name.toLower())) {
+						continue;
+					}
+					state->used.push_back(name.toLower());
+					++taken;
+					++state->pending;
+					GetJson(
+						u"https://api.deezer.com/artist/"_q
+							+ QString::number(qint64(
+								artist.value(u"id"_q).toDouble()))
+							+ u"/top?limit=8"_q,
+						[=](QJsonObject top) {
+						const auto songs = top.value(u"data"_q).toArray();
+						if (!songs.isEmpty()) {
+							auto random = std::mt19937(
+								uint32(base::RandomValue<uint32>()));
+							for (auto n = 0; n != 2; ++n) {
+								const auto title = songs.at(int(random()
+									% uint32(songs.size()))).toObject().value(
+										u"title"_q).toString();
+								const auto query = name + ' ' + title;
+								if (!title.isEmpty()
+									&& !ranges::contains(state->queries, query)) {
+									state->queries.push_back(query);
+								}
+							}
+						}
+						finishOne();
+					});
+				}
+				finishOne();
+			});
+			finishOne();
+		});
+	}
+	if (!count) {
+		state->done({});
+	}
+}
+
+// «Мой микс» like in VK: songs of artists similar to the ones you listen
+// to (your playlists and the song playing now), not the same artists
+// again. Falls back to your own artists when Deezer is not reachable.
 void BuildMix(
 		not_null<Main::Session*> session,
 		Fn<void(std::vector<FullMsgId>, bool)> done) {
@@ -928,30 +1053,43 @@ void BuildMix(
 	}
 	auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
 	std::shuffle(artists.begin(), artists.end(), random);
-	if (artists.size() > 6) {
-		artists.resize(6);
-	}
-	struct Collected {
-		std::vector<FullMsgId> ids;
-		int waiting = 0;
-	};
-	const auto collected = std::make_shared<Collected>();
-	collected->waiting = int(artists.size());
-	for (const auto &artist : artists) {
-		SearchBot(session, artist, [=](std::vector<FullMsgId> ids) {
-			auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
-			std::shuffle(ids.begin(), ids.end(), random);
-			for (auto i = 0; i != std::min(int(ids.size()), 4); ++i) {
-				collected->ids.push_back(ids[i]);
-			}
-			if (--collected->waiting == 0) {
-				auto all = std::move(collected->ids);
-				auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
-				std::shuffle(all.begin(), all.end(), random);
-				done(std::move(all), true);
-			}
-		});
-	}
+	FindSimilarSongs(artists, crl::guard(session, [=](
+			std::vector<QString> similar) {
+		const auto exact = !similar.empty();
+		auto queries = exact ? std::move(similar) : artists;
+		if (queries.size() > size_t(exact ? 18 : 6)) {
+			queries.resize(exact ? 18 : 6);
+		}
+		struct Collected {
+			std::vector<FullMsgId> ids;
+			int waiting = 0;
+		};
+		const auto collected = std::make_shared<Collected>();
+		collected->waiting = int(queries.size());
+		for (const auto &query : queries) {
+			SearchBot(session, query, [=](std::vector<FullMsgId> ids) {
+				if (exact) {
+					if (!ids.empty()) {
+						collected->ids.push_back(ids.front()); // best match
+					}
+				} else {
+					auto random = std::mt19937(
+						uint32(base::RandomValue<uint32>()));
+					std::shuffle(ids.begin(), ids.end(), random);
+					for (auto i = 0; i != std::min(int(ids.size()), 4); ++i) {
+						collected->ids.push_back(ids[i]);
+					}
+				}
+				if (--collected->waiting == 0) {
+					auto all = std::move(collected->ids);
+					auto random = std::mt19937(
+						uint32(base::RandomValue<uint32>()));
+					std::shuffle(all.begin(), all.end(), random);
+					done(std::move(all), true);
+				}
+			});
+		}
+	}));
 }
 
 enum class ViewKind {
@@ -1248,7 +1386,7 @@ void Show(not_null<Window::SessionController*> controller) {
 			const auto generation = ++nav->generation;
 			*title = Utf("Мой микс");
 			content->clear();
-			const auto status = addStatus(Utf("Собираю микс из твоих исполнителей…"));
+			const auto status = addStatus(Utf("Подбираю музыку, похожую на твою…"));
 			setBackButtons();
 			BuildMix(session, crl::guard(box, [=](
 					std::vector<FullMsgId> ids,
@@ -1259,10 +1397,10 @@ void Show(not_null<Window::SessionController*> controller) {
 				if (!addFoundRows(ids)) {
 					status->setText(hadArtists
 						? Utf("Музыкальный поиск Telegram сейчас не ответил. Попробуй ещё раз.")
-						: Utf("Добавь песни в плейлисты — микс соберётся из их исполнителей."));
+						: Utf("Добавь песни в плейлисты или включи песню — микс подберётся по ним."));
 					return;
 				}
-				status->setText(Utf("Песни твоих исполнителей вперемешку. Каждый раз новый микс."));
+				status->setText(Utf("Похожие исполнители на тех, кого ты слушаешь. Каждый раз новый микс."));
 				box->clearButtons();
 				box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
 					crl::on_main(box, [=] { nav->home(); });

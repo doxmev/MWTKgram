@@ -513,7 +513,7 @@ public class MwtkMusicActivity extends BaseFragment {
 
     private void runMix() {
         int generation = ++searchGeneration;
-        MwtkUi.toast("Собираю микс из твоих исполнителей…");
+        MwtkUi.toast("Подбираю похожую музыку…");
         MwtkMusicBot.mix(currentAccount, (songs, hadArtists) -> {
             if (generation != searchGeneration || getParentActivity() == null) {
                 return;
@@ -521,7 +521,7 @@ public class MwtkMusicActivity extends BaseFragment {
             if (songs.isEmpty()) {
                 MwtkUi.toast(hadArtists
                     ? "Музыкальный поиск Telegram не ответил, попробуй ещё раз"
-                    : "Добавь песни в плейлисты — микс соберётся из их исполнителей");
+                    : "Добавь песни в плейлисты или включи песню — микс подберётся по ним");
                 return;
             }
             showResults("Мой микс", songs);

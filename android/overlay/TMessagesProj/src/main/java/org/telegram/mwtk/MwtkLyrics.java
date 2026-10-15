@@ -360,7 +360,7 @@ public final class MwtkLyrics {
         });
     }
 
-    private static String get(String url) {
+    static String get(String url) {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(url).openConnection();
