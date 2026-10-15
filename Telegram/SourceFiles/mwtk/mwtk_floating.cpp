@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_floating.h"
 
 #include "base/event_filter.h"
+#include "base/options.h"
 #include "base/timer.h"
 #include "core/application.h"
 #include "data/data_peer.h"
@@ -19,11 +20,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mainwindow.h"
 #include "window/main_window.h"
 #include "mwtk/mwtk_options.h"
+#include "ui/layers/generic_box.h"
 #include "ui/rp_widget.h"
+#include "ui/widgets/checkbox.h"
+#include "ui/widgets/labels.h"
 #include "ui/style/style_core_scale.h"
 #include "ui/userpic_view.h"
 #include "window/window_controller.h"
 #include "window/window_session_controller.h"
+#include "styles/style_layers.h"
 #include "styles/style_widgets.h"
 
 #include <QtCore/QCoreApplication>
@@ -40,8 +45,61 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Mwtk::Floating {
 namespace {
 
-constexpr auto kMaxBubbles = 16;
 constexpr auto kTick = crl::time(16);
+
+[[nodiscard]] int BubblesCount() {
+	return std::clamp(OptionInt(kOptionFloatCount), 5, 40);
+}
+
+[[nodiscard]] std::vector<uint64> PickedIds() {
+	auto result = std::vector<uint64>();
+	for (const auto &part : OptionString(kOptionFloatPicked).split(
+			',',
+			Qt::SkipEmptyParts)) {
+		auto ok = false;
+		const auto value = part.trimmed().toULongLong(&ok);
+		if (ok && value) {
+			result.push_back(value);
+		}
+	}
+	return result;
+}
+
+// The chats that fly: recent, pinned or picked by hand.
+[[nodiscard]] std::vector<not_null<History*>> FloatingChats(
+		not_null<Main::Session*> session) {
+	const auto limit = size_t(BubblesCount());
+	const auto source = std::clamp(OptionInt(kOptionFloatSource), 0, 2);
+	auto result = std::vector<not_null<History*>>();
+	if (source == 2) {
+		for (const auto id : PickedIds()) {
+			if (const auto peer = session->data().peerLoaded(PeerId(id))) {
+				result.push_back(session->data().history(peer));
+				if (result.size() >= limit) {
+					break;
+				}
+			}
+		}
+		if (!result.empty()) {
+			return result;
+		}
+	}
+	const auto list = session->data().chatsList()->indexed();
+	for (const auto &row : list->all()) {
+		const auto history = row->history();
+		if (!history) {
+			continue;
+		}
+		if (source == 1 && !history->isPinnedDialog(FilterId())) {
+			continue;
+		}
+		result.push_back(history);
+		if (result.size() >= limit) {
+			break;
+		}
+	}
+	return result;
+}
 
 class FloatingWidget final : public Ui::RpWidget {
 public:
@@ -104,21 +162,15 @@ FloatingWidget::FloatingWidget(
 	const auto next = [=] {
 		return std::uniform_real_distribution<double>(0., 1.)(*random);
 	};
-	const auto list = controller->session().data().chatsList()->indexed();
-	for (const auto &row : list->all()) {
-		const auto history = row->history();
-		if (!history) {
-			continue;
-		}
+	const auto chats = FloatingChats(&controller->session());
+	const auto many = (chats.size() > 20);
+	for (const auto history : chats) {
 		auto bubble = Bubble{ .peer = history->peer };
 		bubble.name = history->peer->name();
 		bubble.unread = history->unreadCount();
-		bubble.radius = (26. + 10. * next()) * scale;
+		bubble.radius = ((many ? 20. : 26.) + 10. * next()) * scale;
 		bubble.phase = next() * 6.28;
 		_bubbles.push_back(std::move(bubble));
-		if (_bubbles.size() >= kMaxBubbles) {
-			break;
-		}
 	}
 	sizeValue(
 	) | rpl::on_next([=](QSize size) {
@@ -308,7 +360,7 @@ void FloatingWidget::paintEvent(QPaintEvent *e) {
 	p.drawText(
 		rect().marginsRemoved({ 0, 0, 0, int(14 * scale) }),
 		Qt::AlignHCenter | Qt::AlignBottom,
-		QString::fromUtf8("Хватай и кидай чаты · клик — открыть · F8 или Esc — выйти"));
+		QString::fromUtf8("Хватай и кидай чаты · клик по чату — открыть · клик мимо — выйти"));
 }
 
 void FloatingWidget::mousePressEvent(QMouseEvent *e) {
@@ -388,6 +440,51 @@ void FloatingWidget::keyPressEvent(QKeyEvent *e) {
 }
 
 } // namespace
+
+void ShowPickBox(not_null<Window::SessionController*> controller) {
+	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
+		box->setTitle(rpl::single(QString::fromUtf8("Какие чаты летают")));
+		box->setWidth(st::boxWideWidth);
+		box->setMaxHeight(st::boxMaxListHeight * 2);
+		const auto picked = PickedIds();
+		const auto checks = std::make_shared<
+			std::vector<std::pair<uint64, Ui::Checkbox*>>>();
+		const auto list = controller->session().data().chatsList()->indexed();
+		auto added = 0;
+		for (const auto &row : list->all()) {
+			const auto history = row->history();
+			if (!history) {
+				continue;
+			}
+			const auto id = history->peer->id.value;
+			const auto checked = ranges::contains(picked, id);
+			const auto check = box->addRow(object_ptr<Ui::Checkbox>(
+				box,
+				history->peer->name(),
+				checked,
+				st::defaultBoxCheckbox));
+			checks->emplace_back(id, check);
+			if (++added >= 300) {
+				break;
+			}
+		}
+		box->addButton(rpl::single(QString::fromUtf8("Сохранить")), [=] {
+			auto ids = QStringList();
+			for (const auto &[id, check] : *checks) {
+				if (check->checked()) {
+					ids.push_back(QString::number(id));
+				}
+			}
+			base::options::lookup<QString>(kOptionFloatPicked).set(
+				ids.join(','));
+			base::options::lookup<int>(kOptionFloatSource).set(2);
+			box->closeBox();
+		});
+		box->addButton(rpl::single(QString::fromUtf8("Отмена")), [=] {
+			box->closeBox();
+		});
+	}));
+}
 
 void Toggle(not_null<Window::SessionController*> controller) {
 	auto &current = Current();

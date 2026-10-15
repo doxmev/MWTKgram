@@ -62,6 +62,47 @@ struct Active {
 	FullMsgId playing;
 };
 
+// A queue that is not saved: search results and «Мой микс».
+struct Queue {
+	base::weak_ptr<Main::Session> session;
+	std::vector<FullMsgId> items;
+	int position = -1;
+};
+
+[[nodiscard]] Queue &CurrentQueue() {
+	static auto result = Queue();
+	return result;
+}
+
+[[nodiscard]] bool QueueOwns(const AudioMsgId &current) {
+	const auto &queue = CurrentQueue();
+	return queue.session
+		&& current.audio()
+		&& (current.type() == AudioMsgId::Type::Song)
+		&& (queue.position >= 0)
+		&& (queue.position < int(queue.items.size()))
+		&& (queue.items[queue.position] == current.contextId());
+}
+
+bool QueuePlay(int position) {
+	auto &queue = CurrentQueue();
+	const auto session = queue.session.get();
+	if (!session) {
+		return false;
+	}
+	for (auto i = position; i >= 0 && i < int(queue.items.size()); ++i) {
+		const auto item = session->data().message(queue.items[i]);
+		if (!item || !item->media() || !item->media()->document()) {
+			continue;
+		}
+		queue.position = i;
+		::Media::Player::instance()->play(
+			AudioMsgId(item->media()->document(), item->fullId()));
+		return true;
+	}
+	return false;
+}
+
 [[nodiscard]] Storage &State() {
 	static auto result = Storage();
 	return result;
@@ -351,6 +392,7 @@ void Play(
 		return;
 	}
 	auto &active = CurrentActive();
+	CurrentQueue().position = -1;
 	active.session = base::make_weak(session);
 	active.account = AccountKey(session);
 	active.playlist = index;
@@ -374,10 +416,31 @@ void Play(
 }
 
 bool Owns(const AudioMsgId &current) {
-	return IsActiveFor(current);
+	return IsActiveFor(current) || QueueOwns(current);
+}
+
+void PlayQueue(
+		not_null<Main::Session*> session,
+		std::vector<FullMsgId> items,
+		int start) {
+	if (items.empty()) {
+		return;
+	}
+	CurrentActive().playlist = -1;
+	auto &queue = CurrentQueue();
+	queue.session = base::make_weak(session);
+	queue.items = std::move(items);
+	QueuePlay(std::clamp(start, 0, int(queue.items.size()) - 1));
 }
 
 bool HandleMove(const AudioMsgId &current, int delta) {
+	if (QueueOwns(current)) {
+		const auto next = CurrentQueue().position + delta;
+		if (delta < 0) {
+			return (next >= 0) && QueuePlay(next);
+		}
+		return QueuePlay(next);
+	}
 	if (!IsActiveFor(current)) {
 		return false;
 	}
@@ -392,6 +455,10 @@ bool HandleMove(const AudioMsgId &current, int delta) {
 }
 
 bool MoveAvailable(const AudioMsgId &current, int delta) {
+	if (QueueOwns(current)) {
+		const auto next = CurrentQueue().position + delta;
+		return (next >= 0) && (next < int(CurrentQueue().items.size()));
+	}
 	if (!IsActiveFor(current)) {
 		return false;
 	}

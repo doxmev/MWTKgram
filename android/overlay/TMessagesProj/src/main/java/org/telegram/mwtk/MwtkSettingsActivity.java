@@ -31,6 +31,9 @@ public class MwtkSettingsActivity extends BaseFragment {
     private static final String[] LAYOUTS = { "По словам", "Лесенка", "Строкой" };
     private static final String[] VANISH = { "Искры", "Растворение", "Улетает вверх" };
     private static final String[] TEXT_STYLES = { "Неон", "3D", "Пиксели" };
+    private static final String[] APPEAR = { "Вразброс", "Из центра", "С краёв", "Снизу", "Из обложки" };
+    private static final String[] DRIFT = { "Плавание", "Волна", "Спираль", "Дрожь в бит" };
+    private static final String[] FLOAT_SOURCES = { "Последние", "Закреплённые", "Выбрать вручную" };
     private static final String[] COLORS = { "Как в теме", "Красный", "Розовый", "Фиолетовый", "Синий", "Бирюзовый", "Зелёный", "Жёлтый", "Белый" };
     private static final int[] COLOR_VALUES = { 0, 0xffe0141e, 0xffff2fa6, 0xff9b4dff, 0xff1f8bff, 0xff00d4c8, 0xff39ff88, 0xffffcc33, 0xffeeeeee };
 
@@ -106,8 +109,11 @@ public class MwtkSettingsActivity extends BaseFragment {
         header(context, "Список чатов");
         toggle(context, "Объёмные карточки чатов", "Полупрозрачные скруглённые карточки", MwtkConfig.CARDS);
         slider(context, "Скругление карточек", MwtkConfig.RADIUS, 0, 28, " dp");
+        numSlider(context, "Сколько чатов летает", MwtkConfig.FLOAT_COUNT, 16, 5, 40, "");
+        flagCycle(context, "Какие чаты летают", FLOAT_SOURCES, MwtkConfig.FLOAT_SOURCE, 0, null);
+        action(context, "Выбрать летающие чаты", () -> MwtkFloating.showPickDialog(this));
         TextInfoPrivacyCell floatingInfo = new TextInfoPrivacyCell(context);
-        floatingInfo.setText("Летающие чаты: долгое нажатие на заголовок «MWTKgram» над списком. Наклоняй телефон и бросай кружки пальцем.");
+        floatingInfo.setText("Летающие чаты: долгое нажатие на заголовок «MWTKgram» над списком. Бросай кружки пальцем, нажми на кружок — откроется чат, нажми мимо — чаты вернутся.");
         list.addView(floatingInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         header(context, "Кто в сети");
@@ -129,6 +135,8 @@ public class MwtkSettingsActivity extends BaseFragment {
         flagCycle(context, "Расположение слов", LAYOUTS, MwtkConfig.LYRICS_LAYOUT, 0, null);
         flagCycle(context, "Как пропадают слова", VANISH, MwtkConfig.LYRICS_VANISH, 0, null);
         flagCycle(context, "Стиль текста", TEXT_STYLES, MwtkConfig.LYRICS_STYLE, 0, null);
+        flagCycle(context, "Появление", APPEAR, MwtkConfig.LYRICS_APPEAR, 0, null);
+        flagCycle(context, "Движение", DRIFT, MwtkConfig.LYRICS_DRIFT, 0, null);
         numSlider(context, "Движение слов", MwtkConfig.LYRICS_MOTION, 60, 0, 100, "%");
         numSlider(context, "Размер текста", MwtkConfig.LYRICS_SIZE, 100, 60, 140, "%");
         TextInfoPrivacyCell musicInfo = new TextInfoPrivacyCell(context);

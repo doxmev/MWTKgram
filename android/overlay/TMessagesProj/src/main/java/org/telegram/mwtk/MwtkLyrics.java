@@ -19,9 +19,13 @@ import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.ImageLocation;
+import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.MediaController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
@@ -524,6 +528,10 @@ public final class MwtkLyrics {
         }
         view = new LyricsView(root.getContext());
         root.addView(view, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        // Above everything in the window: on phones the screens use elevation
+        // and covered the lyrics drawn at Z = 0.
+        view.setOutlineProvider(null);
+        view.setTranslationZ(AndroidUtilities.dp(900));
         view.start();
     }
 
@@ -560,11 +568,18 @@ public final class MwtkLyrics {
         private boolean running;
         private boolean hideMode;
         private long lastFrame;
+        private final ImageReceiver cover = new ImageReceiver(this);
+        private int coverMessageId;
+        private long coverDialogId;
+        private final android.graphics.RectF coverRect = new android.graphics.RectF();
+        private final android.graphics.RectF tmpRect = new android.graphics.RectF();
+        private float beat;
 
         LyricsView(Context context) {
             super(context);
             setWillNotDraw(false);
             setClickable(false);
+            cover.setRoundRadius(AndroidUtilities.dp(18));
             hintPaint.setTextSize(AndroidUtilities.dp(13));
             hintPaint.setColor(0x99ffffff);
             hintPaint.setTextAlign(Paint.Align.CENTER);
@@ -574,6 +589,61 @@ public final class MwtkLyrics {
         @Override
         protected boolean verifyDrawable(android.graphics.drawable.Drawable who) {
             return who == backdrop || super.verifyDrawable(who);
+        }
+
+        @Override
+        protected void onAttachedToWindow() {
+            super.onAttachedToWindow();
+            cover.onAttachedToWindow();
+        }
+
+        @Override
+        protected void onDetachedFromWindow() {
+            cover.onDetachedFromWindow();
+            MwtkOverlay.setContentHidden(false);
+            super.onDetachedFromWindow();
+        }
+
+        // ---------------------------------------------- where things go
+
+        /** The cover side for a line: it changes every two lines. */
+        private int coverMode(int index) {
+            int seed = (currentKey == null ? 0 : currentKey.hashCode()) + (index / 2) * 7919;
+            if (getWidth() > getHeight()) {
+                return Math.floorMod(seed, 3); // 0 top, 1 left, 2 right
+            }
+            return Math.floorMod(seed, 2) == 0 ? 0 : 3; // 0 top, 3 bottom
+        }
+
+        private void coverTarget(int mode, android.graphics.RectF out) {
+            float w = getWidth();
+            float h = getHeight();
+            float side = Math.min(w, h) * (mode == 1 || mode == 2 ? 0.36f : 0.40f);
+            float cx = mode == 1 ? w * 0.25f : mode == 2 ? w * 0.75f : w / 2f;
+            float cy = mode == 0 ? h * 0.27f : mode == 3 ? h * 0.71f : h * 0.48f;
+            out.set(cx - side / 2, cy - side / 2, cx + side / 2, cy + side / 2);
+        }
+
+        /** Where the words of a line may go. */
+        private android.graphics.RectF textArea(int index) {
+            float w = getWidth();
+            float h = getHeight();
+            if (hideMode) {
+                switch (coverMode(index)) {
+                    case 1: return new android.graphics.RectF(w * 0.47f, h * 0.10f, w * 0.97f, h * 0.88f);
+                    case 2: return new android.graphics.RectF(w * 0.03f, h * 0.10f, w * 0.53f, h * 0.88f);
+                    case 3: return new android.graphics.RectF(w * 0.05f, h * 0.10f, w * 0.95f, h * 0.46f);
+                    default: return new android.graphics.RectF(w * 0.05f, h * 0.53f, w * 0.95f, h * 0.88f);
+                }
+            }
+            // Tablet mode: the free right side.
+            android.graphics.Rect free = MwtkTablet.freeArea(this);
+            if (free != null) {
+                return new android.graphics.RectF(free);
+            }
+            // Tablet mode off on a big screen: a phone-like column in the middle.
+            float column = Math.min(w, AndroidUtilities.dp(560));
+            return new android.graphics.RectF((w - column) / 2f, 0, (w + column) / 2f, h);
         }
 
         void start() {
@@ -618,6 +688,9 @@ public final class MwtkLyrics {
             if (hide != hideMode) {
                 hideMode = hide;
                 setClickable(hide);
+                // Really hide the chats, do not just paint over them.
+                MwtkOverlay.setContentHidden(hide);
+                reset();
             }
             setVisibility(active || !particles.isEmpty() ? VISIBLE : GONE);
             if (playingNow || !particles.isEmpty()) {
@@ -676,94 +749,154 @@ public final class MwtkLyrics {
         private ArrayList<Word> layoutLine(int index) {
             Line line = lines.get(index);
             ArrayList<Word> result = new ArrayList<>();
-            String[] texts = line.text.split(" ");
+            String[] texts = line.text.trim().split("\\s+");
             if (line.text.trim().isEmpty() || texts.length == 0) {
                 return result;
             }
             int layout = MwtkConfig.num(MwtkConfig.LYRICS_LAYOUT, 0);
             int style = MwtkConfig.num(MwtkConfig.LYRICS_STYLE, 0);
+            int appear = MwtkConfig.num(MwtkConfig.LYRICS_APPEAR, 0);
             float sizeK = MwtkConfig.num(MwtkConfig.LYRICS_SIZE, 100) / 100f;
             int accent = MwtkConfig.accent();
             Random r = new Random(currentKey == null ? index : currentKey.hashCode() * 31L + index);
-            // Tablet mode: the lyrics use the free right side; "hide chats" keeps the whole screen.
-            android.graphics.Rect area = hideMode ? null : MwtkTablet.freeArea(this);
-            float areaLeft = area != null ? area.left : 0;
-            float areaTop = area != null ? area.top : 0;
-            float areaW = area != null ? area.width() : getWidth();
-            float areaH = area != null ? area.height() : getHeight();
-            boolean wide = areaW > AndroidUtilities.dp(700) || (area != null && areaW > AndroidUtilities.dp(420));
+            android.graphics.RectF area = textArea(index);
+            float areaW = area.width();
+            float areaH = area.height();
+            boolean wide = MwtkTablet.enabled() && areaW > AndroidUtilities.dp(420);
             float base = Math.max(AndroidUtilities.dp(22), Math.min(areaW / (wide ? 14f : 9f), AndroidUtilities.dp(wide ? 56 : 40))) * sizeK;
+            int n = texts.length;
             int total = 0;
             for (String t : texts) {
                 total += t.length() + 1;
             }
             double span = Math.max(line.end - line.at, 400) * 0.8;
             double at = line.at;
-            for (int i = 0; i < texts.length; i++) {
+            float[] mul = new float[n];
+            int[] want = new int[n];
+            int perRow = layout == 1 ? 1 : (wide ? 6 : 3);
+            for (int i = 0; i < n; i++) {
                 Word w = new Word();
                 w.text = texts[i];
-                if (line.words != null && line.words.length == texts.length) {
+                if (line.words != null && line.words.length == n) {
                     w.start = line.words[i];
-                    w.end = i + 1 < texts.length ? line.words[i + 1] : line.end;
+                    w.end = i + 1 < n ? line.words[i + 1] : line.end;
                 } else {
                     w.start = (long) at;
                     at += span * (texts[i].length() + 1) / total;
                     w.end = (long) at;
                 }
-                w.out = line.end + (layout == 2 ? 0 : (long) (350f * i / texts.length));
+                w.out = line.end + (layout == 2 ? 0 : (long) (350f * i / n));
                 w.phase = r.nextFloat() * 6.28f;
-                double angle = r.nextFloat() * 6.28;
-                w.fromX = (float) Math.cos(angle) * base * 3;
-                w.fromY = (float) Math.sin(angle) * base * 2;
+                w.rotation = layout == 0 ? (r.nextFloat() - 0.5f) * 12f : layout == 1 ? -3f : 0;
+                mul[i] = layout == 2 ? 1f : 0.8f + r.nextFloat() * 0.45f;
+                want[i] = layout == 0 ? 1 + r.nextInt(perRow) : (layout == 2 ? 1000 : perRow);
                 result.add(w);
             }
-            float width = areaW;
-            float height = areaH;
-            float cx = areaLeft + (layout == 2 ? width / 2 : width * (0.5f + (r.nextFloat() - 0.5f) * 0.2f));
-            float cy = areaTop + (layout == 2 ? height * 0.42f : height * (0.38f + (r.nextFloat() - 0.5f) * 0.16f));
-            // On a narrow phone screen every layout wraps into rows; a wide screen fits longer rows.
-            int perRow = layout == 1 ? 1 : (wide ? 6 : 3);
-            float rowH = base * 1.3f;
-            ArrayList<ArrayList<Word>> rows = new ArrayList<>();
-            ArrayList<Word> row = new ArrayList<>();
-            float rowWidth = 0;
+            float jitterX = (r.nextFloat() - 0.5f);
+            float jitterY = (r.nextFloat() - 0.5f);
+
+            // Rows that fit the area; the text shrinks when a line is too long.
             TextPaint measure = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-            measure.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            for (Word w : result) {
-                float size = layout == 2 ? base : base * (0.8f + r.nextFloat() * 0.45f);
-                measure.setTextSize(size);
-                float ww = measure.measureText(w.text);
-                int want = layout == 0 ? 1 + r.nextInt(perRow) : perRow;
-                if (!row.isEmpty() && (row.size() >= want || rowWidth + ww > width * 0.86f)) {
-                    rows.add(row);
-                    row = new ArrayList<>();
-                    rowWidth = 0;
+            measure.setTypeface(style == 2 ? Typeface.MONOSPACE : Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+            float[] widths = new float[n];
+            ArrayList<ArrayList<Integer>> rows = new ArrayList<>();
+            for (int attempt = 0; attempt < 5; attempt++) {
+                rows.clear();
+                ArrayList<Integer> row = new ArrayList<>();
+                float rowWidth = 0;
+                float gap = base * 0.3f;
+                float widest = 0;
+                for (int i = 0; i < n; i++) {
+                    measure.setTextSize(base * mul[i]);
+                    widths[i] = measure.measureText(texts[i]);
+                    if (!row.isEmpty() && (row.size() >= want[i] || rowWidth + gap + widths[i] > areaW * 0.9f)) {
+                        rows.add(row);
+                        row = new ArrayList<>();
+                        rowWidth = 0;
+                    }
+                    rowWidth += (row.isEmpty() ? 0 : gap) + widths[i];
+                    widest = Math.max(widest, rowWidth);
+                    row.add(i);
                 }
+                if (!row.isEmpty()) {
+                    rows.add(row);
+                }
+                float tall = rows.size() * base * 1.3f + (layout == 1 ? rows.size() * base * 0.1f : 0);
+                float fit = Math.min(areaW * 0.94f / Math.max(widest, 1), areaH * 0.9f / Math.max(tall, 1));
+                if (fit >= 0.999f || base <= AndroidUtilities.dp(12)) {
+                    break;
+                }
+                base = Math.max(AndroidUtilities.dp(12), base * fit * 0.98f);
+            }
+
+            float cx = area.centerX() + (layout == 2 ? 0 : jitterX * areaW * 0.15f);
+            float cy = area.top + (layout == 2 ? areaH * 0.45f : areaH * (0.42f + jitterY * 0.12f));
+            float rowH = base * 1.3f;
+            float gap = base * 0.3f;
+            for (int ri = 0; ri < rows.size(); ri++) {
+                ArrayList<Integer> row = rows.get(ri);
+                float rowTotal = 0;
+                for (int i : row) {
+                    rowTotal += widths[i];
+                }
+                rowTotal += gap * (row.size() - 1);
+                float x = cx - rowTotal / 2;
+                if (layout == 1) {
+                    x = cx - areaW * 0.22f + ri * base * 0.6f;
+                }
+                for (int i : row) {
+                    Word w = result.get(i);
+                    w.x = x + widths[i] / 2;
+                    w.y = cy + (ri - (rows.size() - 1) / 2f) * rowH;
+                    x += widths[i] + gap;
+                }
+            }
+            // Keep the whole line inside the area.
+            float minX = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, minY = Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+            for (int i = 0; i < n; i++) {
+                Word w = result.get(i);
+                float hh = base * mul[i] * 0.7f;
+                minX = Math.min(minX, w.x - widths[i] / 2);
+                maxX = Math.max(maxX, w.x + widths[i] / 2);
+                minY = Math.min(minY, w.y - hh);
+                maxY = Math.max(maxY, w.y + hh);
+            }
+            float shiftX = minX < area.left ? area.left - minX : (maxX > area.right ? area.right - maxX : 0);
+            float shiftY = minY < area.top ? area.top - minY : (maxY > area.bottom ? area.bottom - maxY : 0);
+
+            // Where the words fly in from.
+            android.graphics.RectF coverBox = new android.graphics.RectF();
+            coverTarget(coverMode(index), coverBox);
+            for (int i = 0; i < n; i++) {
+                Word w = result.get(i);
+                w.x += shiftX;
+                w.y += shiftY;
+                switch (appear) {
+                    case 1:
+                        w.fromX = area.centerX() - w.x;
+                        w.fromY = area.centerY() - w.y;
+                        break;
+                    case 2:
+                        w.fromX = w.x < getWidth() / 2f ? -w.x - base * 2 : getWidth() - w.x + base * 2;
+                        w.fromY = (r.nextFloat() - 0.5f) * base;
+                        break;
+                    case 3:
+                        w.fromX = (r.nextFloat() - 0.5f) * base * 2;
+                        w.fromY = getHeight() - w.y + base * 2;
+                        break;
+                    case 4:
+                        w.fromX = (hideMode ? coverBox.centerX() : area.centerX()) - w.x;
+                        w.fromY = (hideMode ? coverBox.centerY() : area.centerY()) - w.y;
+                        break;
+                    default: {
+                        double angle = r.nextFloat() * 6.28;
+                        w.fromX = (float) Math.cos(angle) * base * 3;
+                        w.fromY = (float) Math.sin(angle) * base * 2;
+                    }
+                }
+                float size = base * mul[i];
                 w.dim = render(w.text, size, false, style, accent);
                 w.lit = render(w.text, size, true, style, accent);
-                row.add(w);
-                rowWidth += ww + base * 0.4f;
-            }
-            if (!row.isEmpty()) {
-                rows.add(row);
-            }
-            for (int ri = 0; ri < rows.size(); ri++) {
-                ArrayList<Word> words = rows.get(ri);
-                float rowTotal = 0;
-                for (Word w : words) {
-                    rowTotal += w.dim.getWidth() - w.dim.getHeight() * 0.5f;
-                }
-                float x = cx - rowTotal / 2 + (layout == 0 ? (r.nextFloat() - 0.5f) * base : 0);
-                if (layout == 1) {
-                    x = cx - width * (wide ? 0.3f : 0.25f) + ri * base * (wide ? 1.1f : 0.6f);
-                }
-                for (Word w : words) {
-                    float ww = w.dim.getWidth() - w.dim.getHeight() * 0.5f;
-                    w.x = x + ww / 2;
-                    w.y = cy + (ri - (rows.size() - 1) / 2f) * rowH + (layout == 0 ? (r.nextFloat() - 0.5f) * base * 0.5f : 0);
-                    w.rotation = layout == 0 ? (r.nextFloat() - 0.5f) * 12f : layout == 1 ? -3f : 0;
-                    x += ww;
-                }
             }
             return result;
         }
@@ -791,17 +924,155 @@ public final class MwtkLyrics {
             }
         }
 
+        private int currentLine(long now) {
+            int current = 0;
+            for (int i = 0; i < lines.size(); i++) {
+                if (lines.get(i).at <= now) {
+                    current = i;
+                }
+            }
+            return current;
+        }
+
+        private float[] spectrum(float seconds, int count) {
+            float[] real = MwtkBeat.bands();
+            float[] result = new float[count];
+            boolean silent = true;
+            for (float v : real) {
+                if (v > 0.01f) {
+                    silent = false;
+                    break;
+                }
+            }
+            boolean playing = !MediaController.getInstance().isMessagePaused();
+            for (int i = 0; i < count; i++) {
+                if (!silent) {
+                    // Low notes in the middle, mirrored to both sides.
+                    int mirrored = Math.abs(i - count / 2) * 2 * real.length / Math.max(count, 1);
+                    result[i] = real[Math.min(real.length - 1, mirrored)];
+                } else if (playing) {
+                    // No microphone permission: a calm made-up motion.
+                    result[i] = 0.15f + 0.25f * (0.5f + 0.5f * (float) Math.sin(seconds * (3 + i % 5) + i * 1.7f));
+                }
+            }
+            return result;
+        }
+
+        private void drawCover(Canvas canvas, long now, float dt, long frame) {
+            MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+            if (playing == null) {
+                return;
+            }
+            if (playing.getId() != coverMessageId || playing.getDialogId() != coverDialogId) {
+                coverMessageId = playing.getId();
+                coverDialogId = playing.getDialogId();
+                TLRPC.Document document = playing.getDocument();
+                TLRPC.PhotoSize thumb = document != null ? FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 320) : null;
+                if (thumb != null) {
+                    cover.setImage(ImageLocation.getForDocument(thumb, document), "320_320", null, null, playing, 0);
+                } else {
+                    cover.setImageBitmap((android.graphics.drawable.Drawable) null);
+                }
+            }
+            float seconds = frame / 1000f;
+            coverTarget(coverMode(currentLine(now)), tmpRect);
+            // The cover keeps drifting a little around its place.
+            tmpRect.offset(
+                (float) (Math.sin(seconds * 0.23f) * getWidth() * 0.03f + Math.sin(seconds * 0.61f) * getWidth() * 0.01f),
+                (float) (Math.cos(seconds * 0.31f) * getHeight() * 0.025f));
+            if (coverRect.isEmpty() || dt <= 0) {
+                coverRect.set(tmpRect);
+            } else {
+                float k = Math.min(1f, dt * 2.2f);
+                coverRect.set(
+                    coverRect.left + (tmpRect.left - coverRect.left) * k,
+                    coverRect.top + (tmpRect.top - coverRect.top) * k,
+                    coverRect.right + (tmpRect.right - coverRect.right) * k,
+                    coverRect.bottom + (tmpRect.bottom - coverRect.bottom) * k);
+            }
+            float half = coverRect.width() / 2f;
+            float cx = coverRect.centerX();
+            float cy = coverRect.centerY() + (float) Math.sin(seconds * 1.1f) * half * 0.06f;
+            float zoom = 1f + 0.10f * beat;
+            int accent = MwtkConfig.accent();
+
+            // A ring of bars around the cover jumping with the music.
+            float[] values = spectrum(seconds, 48);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setStrokeWidth(Math.max(AndroidUtilities.dp(2.5f), half * 0.035f));
+            float inner = half * 1.48f * zoom;
+            float longest = half * 0.45f;
+            for (int i = 0; i < values.length; i++) {
+                double a = i * 2 * Math.PI / values.length - Math.PI / 2;
+                float v = Math.min(1f, 0.06f + values[i] + beat * 0.25f);
+                paint.setColor(accent);
+                paint.setAlpha((int) (120 + 120 * v));
+                float c = (float) Math.cos(a);
+                float sn = (float) Math.sin(a);
+                canvas.drawLine(cx + c * inner, cy + sn * inner, cx + c * (inner + longest * v), cy + sn * (inner + longest * v), paint);
+            }
+            paint.setStyle(Paint.Style.FILL);
+            paint.setStrokeCap(Paint.Cap.BUTT);
+
+            canvas.save();
+            canvas.translate(cx, cy);
+            canvas.rotate((float) (Math.sin(seconds * 0.8f) * 5 + Math.sin(seconds * 0.37f) * 3));
+            canvas.scale(zoom, zoom);
+            paint.setColor(accent);
+            for (int i = 4; i > 0; i--) {
+                paint.setAlpha((int) ((18 + 50 * beat) / i));
+                float grow = half * 0.05f * i;
+                tmpRect.set(-half - grow, -half - grow, half + grow, half + grow);
+                canvas.drawRoundRect(tmpRect, AndroidUtilities.dp(18) + grow, AndroidUtilities.dp(18) + grow, paint);
+            }
+            if (cover.hasImageSet()) {
+                cover.setImageCoords(-half, -half, half * 2, half * 2);
+                cover.draw(canvas);
+            } else {
+                paint.setColor(Color.rgb(Color.red(accent) / 3, Color.green(accent) / 3, Color.blue(accent) / 3));
+                paint.setAlpha(255);
+                tmpRect.set(-half, -half, half, half);
+                canvas.drawRoundRect(tmpRect, AndroidUtilities.dp(18), AndroidUtilities.dp(18), paint);
+                hintPaint.setTextSize(half * 0.9f);
+                canvas.drawText("♪", 0, half * 0.3f, hintPaint);
+                hintPaint.setTextSize(AndroidUtilities.dp(13));
+            }
+            canvas.restore();
+            paint.setAlpha(255);
+
+            // Equalizer bars under the text.
+            android.graphics.RectF area = textArea(currentLine(now));
+            float[] bars = spectrum(seconds + 0.5f, 28);
+            float full = Math.min(area.width() * 0.8f, AndroidUtilities.dp(320));
+            float step = full / bars.length;
+            float tallest = Math.max(area.height() * 0.08f, AndroidUtilities.dp(14));
+            float bottom = area.bottom - AndroidUtilities.dp(4);
+            float left = area.centerX() - full / 2;
+            for (int i = 0; i < bars.length; i++) {
+                float v = Math.max(0.05f, Math.min(1f, bars[i] + beat * 0.3f));
+                paint.setColor(accent);
+                paint.setAlpha((int) (70 + 130 * v));
+                float bh = tallest * v;
+                tmpRect.set(left + i * step + step * 0.2f, bottom - bh, left + i * step + step * 0.8f, bottom);
+                canvas.drawRoundRect(tmpRect, step * 0.3f, step * 0.3f, paint);
+            }
+            paint.setAlpha(255);
+        }
+
         @Override
         protected void onDraw(Canvas canvas) {
             long frame = System.currentTimeMillis();
             float dt = lastFrame == 0 ? 0 : Math.min((frame - lastFrame) / 1000f, 0.1f);
             lastFrame = frame;
+            beat = MwtkBeat.level();
+            long now = position();
             if (hideMode) {
                 backdrop.setBounds(0, 0, getWidth(), getHeight());
                 backdrop.draw(canvas);
-                canvas.drawText("Нажми, чтобы вернуть чаты", getWidth() / 2f, getHeight() - AndroidUtilities.dp(40), hintPaint);
+                canvas.drawText("Нажми, чтобы вернуть чаты", getWidth() / 2f, getHeight() - AndroidUtilities.dp(24), hintPaint);
+                drawCover(canvas, now, dt, frame);
             }
-            long now = position();
             if (enabled() && !lines.isEmpty() && getWidth() > 0) {
                 for (int i = 0; i < lines.size(); i++) {
                     Line l = lines.get(i);
@@ -817,6 +1088,7 @@ public final class MwtkLyrics {
                 }
                 float motion = MwtkConfig.num(MwtkConfig.LYRICS_MOTION, 60) / 100f;
                 int vanish = MwtkConfig.num(MwtkConfig.LYRICS_VANISH, 0);
+                int drift = MwtkConfig.num(MwtkConfig.LYRICS_DRIFT, 0);
                 float seconds = frame / 1000f;
                 for (ArrayList<Word> words : layouts) {
                     for (Word w : words) {
@@ -825,15 +1097,38 @@ public final class MwtkLyrics {
                         }
                         float k = Math.min(1f, Math.max(0f, (now - (w.start - 450)) / 550f));
                         float ease = 1f - (1f - k) * (1f - k) * (1f - k);
-                        float onScreen = (now - w.start) / 1000f;
-                        float x = w.x + w.fromX * (1 - ease)
-                            + (float) Math.sin(seconds * 0.9f + w.phase) * AndroidUtilities.dp(4) * motion
-                            + onScreen * AndroidUtilities.dp(2) * motion * (float) Math.cos(w.phase);
-                        float y = w.y + w.fromY * (1 - ease)
-                            + (float) Math.cos(seconds * 1.1f + w.phase) * AndroidUtilities.dp(3) * motion
-                            - onScreen * AndroidUtilities.dp(1.5f) * motion;
+                        float onScreen = Math.max(0f, (now - w.start) / 1000f);
+                        float dx;
+                        float dy;
+                        switch (drift) {
+                            case 1: // wave
+                                dx = (float) Math.sin(seconds * 0.7f + w.phase) * AndroidUtilities.dp(3) * motion;
+                                dy = (float) Math.sin(seconds * 2.4f - w.x / AndroidUtilities.dp(40)) * AndroidUtilities.dp(9) * motion;
+                                break;
+                            case 2: { // spiral
+                                float radius = (AndroidUtilities.dp(4) + onScreen * AndroidUtilities.dp(5)) * motion;
+                                float angle = seconds * 1.7f + w.phase;
+                                dx = (float) Math.cos(angle) * radius;
+                                dy = (float) Math.sin(angle) * radius;
+                                break;
+                            }
+                            case 3: // shake on the beat
+                                dx = (float) Math.sin(seconds * 37f + w.phase * 5f) * AndroidUtilities.dp(6) * beat
+                                    + (float) Math.sin(seconds * 0.9f + w.phase) * AndroidUtilities.dp(2) * motion;
+                                dy = (float) Math.cos(seconds * 41f + w.phase * 3f) * AndroidUtilities.dp(5) * beat
+                                    + (float) Math.cos(seconds * 1.1f + w.phase) * AndroidUtilities.dp(2) * motion;
+                                break;
+                            default: // float
+                                dx = (float) Math.sin(seconds * 0.9f + w.phase) * AndroidUtilities.dp(4) * motion
+                                    + onScreen * AndroidUtilities.dp(2) * motion * (float) Math.cos(w.phase);
+                                dy = (float) Math.cos(seconds * 1.1f + w.phase) * AndroidUtilities.dp(3) * motion
+                                    - onScreen * AndroidUtilities.dp(1.5f) * motion;
+                        }
+                        float x = w.x + w.fromX * (1 - ease) + dx;
+                        float y = w.y + w.fromY * (1 - ease) + dy;
                         float alpha = ease;
-                        float scale = 0.3f + 0.7f * ease;
+                        boolean singing = now >= w.start && now < w.out;
+                        float scale = (0.3f + 0.7f * ease) * (1f + (singing ? 0.14f : 0.06f) * beat);
                         if (now >= w.out) {
                             if (vanish == 0) {
                                 shatter(w, x, y);
@@ -1021,6 +1316,20 @@ public final class MwtkLyrics {
         status.setTextSize(14);
         status.setText("Нажми «Искать» и выбери подходящий вариант.");
         box.addView(status, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 6));
+        // Lyricsify has no API: it opens in the browser, and the copied .lrc
+        // text is pasted back here.
+        TextView lyricsify = new TextView(context);
+        lyricsify.setTextSize(15);
+        lyricsify.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+        lyricsify.setText("Открыть Lyricsify в браузере");
+        lyricsify.setPadding(0, AndroidUtilities.dp(6), 0, AndroidUtilities.dp(6));
+        box.addView(lyricsify, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 0));
+        TextView paste = new TextView(context);
+        paste.setTextSize(15);
+        paste.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4));
+        paste.setText("Вставить скопированный .lrc текст");
+        paste.setPadding(0, AndroidUtilities.dp(6), 0, AndroidUtilities.dp(6));
+        box.addView(paste, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 24, 0, 24, 6));
         android.widget.ScrollView scroll = new android.widget.ScrollView(context);
         LinearLayout list = new LinearLayout(context);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -1033,6 +1342,33 @@ public final class MwtkLyrics {
         builder.setNegativeButton("Закрыть", null);
         AlertDialog dialog = builder.create();
         fragment.showDialog(dialog);
+        lyricsify.setOnClickListener(v -> {
+            try {
+                String q = URLEncoder.encode(field.getText().toString().trim(), "UTF-8");
+                org.telegram.messenger.browser.Browser.openUrl(context, "https://www.lyricsify.com/search?q=" + q);
+            } catch (Throwable ignore) {
+            }
+        });
+        paste.setOnClickListener(v -> {
+            android.content.ClipboardManager clipboard = (android.content.ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
+            CharSequence text = null;
+            if (clipboard != null && clipboard.hasPrimaryClip() && clipboard.getPrimaryClip() != null
+                && clipboard.getPrimaryClip().getItemCount() > 0) {
+                text = clipboard.getPrimaryClip().getItemAt(0).coerceToText(context);
+            }
+            String lrc = text == null ? "" : text.toString();
+            if (parse(lrc).isEmpty()) {
+                status.setText("В буфере нет текста с временем вида [01:23.45]. Скопируй именно LRC.");
+                return;
+            }
+            MwtkStore.writeText(cacheName(key, ".lrc"), lrc);
+            MwtkStore.file(cacheName(key, ".none2")).delete();
+            if (key.equals(currentKey)) {
+                currentKey = null;
+            }
+            dialog.dismiss();
+            MwtkUi.toast("Текст сохранён");
+        });
         View searchButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
         if (searchButton == null) {
             return;

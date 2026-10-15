@@ -7,6 +7,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_music.h"
 
 #include "apiwrap.h"
+#include "api/api_common.h"
+#include "api/api_sending.h"
+#include "base/random.h"
+#include "base/unixtime.h"
 #include "data/data_audio_msg_id.h"
 #include "data/data_document.h"
 #include "data/data_document_media.h"
@@ -16,7 +20,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_id.h"
 #include "data/data_search_controller.h"
 #include "data/data_session.h"
+#include "history/history.h"
 #include "history/history_item.h"
+#include "inline_bots/inline_bot_result.h"
+#include "main/main_app_config.h"
+#include "data/data_user.h"
 #include "main/main_session.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
@@ -40,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QPainterPath>
 
 #include <map>
+#include <random>
 
 namespace Mwtk::Music {
 namespace {
@@ -750,10 +759,206 @@ void AskName(
 	}));
 }
 
+// ------------------------------------------------------------ music bot
+// The official Telegram music search (the bot from the app config, the one
+// the "attach music" box uses): finds songs everywhere, not only in chats
+// the account is in.
+
+void ResolveMusicBot(
+		not_null<Main::Session*> session,
+		Fn<void(UserData*)> done) {
+	const auto username = session->appConfig().get<QString>(
+		u"music_search_username"_q,
+		QString());
+	if (username.isEmpty()) {
+		done(nullptr);
+		return;
+	}
+	if (const auto peer = session->data().peerByUsername(username)) {
+		done(peer->asUser());
+		return;
+	}
+	session->api().request(MTPcontacts_ResolveUsername(
+		MTP_flags(0),
+		MTP_string(username),
+		MTP_string()
+	)).done(crl::guard(session, [=](const MTPcontacts_ResolvedPeer &result) {
+		auto bot = (UserData*)nullptr;
+		result.match([&](const MTPDcontacts_resolvedPeer &data) {
+			session->data().processUsers(data.vusers());
+			session->data().processChats(data.vchats());
+			const auto peer = session->data().peerLoaded(
+				peerFromMTP(data.vpeer()));
+			bot = peer ? peer->asUser() : nullptr;
+		});
+		done(bot);
+	})).fail(crl::guard(session, [=](const MTP::Error &) {
+		done(nullptr);
+	})).send();
+}
+
+// Calls done() with songs as local (not saved) messages, empty on failure.
+void SearchBot(
+		not_null<Main::Session*> session,
+		const QString &query,
+		Fn<void(std::vector<FullMsgId>)> done) {
+	ResolveMusicBot(session, [=](UserData *bot) {
+		if (!bot) {
+			done({});
+			return;
+		}
+		session->api().request(MTPmessages_GetInlineBotResults(
+			MTP_flags(0),
+			bot->inputUser(),
+			session->user()->input(),
+			MTPInputGeoPoint(),
+			MTP_string(query),
+			MTP_string()
+		)).done(crl::guard(session, [=](const MTPmessages_BotResults &result) {
+			auto ids = std::vector<FullMsgId>();
+			if (result.type() != mtpc_messages_botResults) {
+				done(std::move(ids));
+				return;
+			}
+			const auto &data = result.c_messages_botResults();
+			session->data().processUsers(data.vusers());
+			const auto history = session->data().history(session->user());
+			const auto queryId = data.vquery_id().v;
+			for (const auto &item : data.vresults().v) {
+				const auto parsed = InlineBots::Result::Create(
+					session,
+					queryId,
+					item);
+				const auto document = parsed ? parsed->document() : nullptr;
+				if (!document
+					|| !document->isSong()
+					|| !parsed->contentUrl().isEmpty()) {
+					continue;
+				}
+				// The history owns the local message until the session ends.
+				const auto message = parsed->makeMessage(history, {
+					.id = history->nextNonHistoryEntryId(),
+					.flags = (MessageFlag::FakeHistoryItem
+						| MessageFlag::HasFromId),
+					.from = history->peer->id,
+					.date = base::unixtime::now(),
+					.viaBotId = peerToUser(bot->id),
+				});
+				ids.push_back(message->fullId());
+			}
+			done(std::move(ids));
+		})).fail(crl::guard(session, [=](const MTP::Error &) {
+			done({});
+		})).send();
+	});
+}
+
+// A song from the bot is not a real message, so it is saved to
+// «Избранное» first and the saved message goes to the playlist.
+void SaveAndAddToPlaylist(
+		not_null<Window::SessionController*> controller,
+		FullMsgId id) {
+	const auto session = &controller->session();
+	const auto item = session->data().message(id);
+	if (!item) {
+		return;
+	} else if (item->isRegular()) {
+		Playlists::ShowAddToPlaylistBox(controller, id);
+		return;
+	}
+	const auto document = SongOf(item);
+	if (!document) {
+		return;
+	}
+	const auto history = session->data().history(session->user());
+	const auto lifetime = std::make_shared<rpl::lifetime>();
+	const auto weak = base::make_weak(controller);
+	session->data().itemIdChanged(
+	) | rpl::on_next([=](Data::Session::IdChange change) {
+		const auto strong = weak.get();
+		if (!strong) {
+			lifetime->destroy();
+			return;
+		}
+		const auto sent = session->data().message(change.newId);
+		if (sent && sent->history() == history && SongOf(sent) == document) {
+			lifetime->destroy();
+			Playlists::ShowAddToPlaylistBox(strong, change.newId);
+		}
+	}, *lifetime);
+	Api::SendExistingDocument(
+		Api::MessageToSend(Api::SendAction(history)),
+		document);
+	controller->showToast(Utf("Сохраняю песню в «Избранное»…"));
+}
+
+// «Мой микс»: songs of the artists from your playlists and the one
+// playing now, mixed together.
+void BuildMix(
+		not_null<Main::Session*> session,
+		Fn<void(std::vector<FullMsgId>, bool)> done) {
+	auto artists = std::vector<QString>();
+	const auto add = [&](const QString &name) {
+		const auto clean = name.trimmed();
+		if (clean.isEmpty()) {
+			return;
+		}
+		for (const auto &existing : artists) {
+			if (!existing.compare(clean, Qt::CaseInsensitive)) {
+				return;
+			}
+		}
+		artists.push_back(clean);
+	};
+	const auto current = ::Media::Player::instance()->current(
+		AudioMsgId::Type::Song);
+	if (const auto document = current.audio()) {
+		if (const auto song = document->song()) {
+			add(song->performer);
+		}
+	}
+	for (const auto &playlist : Playlists::List(session)) {
+		for (const auto &track : playlist.tracks) {
+			add(track.performer);
+		}
+	}
+	if (artists.empty()) {
+		done({}, false);
+		return;
+	}
+	auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+	std::shuffle(artists.begin(), artists.end(), random);
+	if (artists.size() > 6) {
+		artists.resize(6);
+	}
+	struct Collected {
+		std::vector<FullMsgId> ids;
+		int waiting = 0;
+	};
+	const auto collected = std::make_shared<Collected>();
+	collected->waiting = int(artists.size());
+	for (const auto &artist : artists) {
+		SearchBot(session, artist, [=](std::vector<FullMsgId> ids) {
+			auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+			std::shuffle(ids.begin(), ids.end(), random);
+			for (auto i = 0; i != std::min(int(ids.size()), 4); ++i) {
+				collected->ids.push_back(ids[i]);
+			}
+			if (--collected->waiting == 0) {
+				auto all = std::move(collected->ids);
+				auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+				std::shuffle(all.begin(), all.end(), random);
+				done(std::move(all), true);
+			}
+		});
+	}
+}
+
 enum class ViewKind {
 	Home,
 	Playlist,
 	Search,
+	Mix,
 };
 
 struct Navigation {
@@ -763,6 +968,7 @@ struct Navigation {
 	Fn<void()> home;
 	Fn<void(int)> playlist;
 	Fn<void(QString)> search;
+	Fn<void()> mix;
 	Fn<void()> refresh;
 };
 
@@ -780,7 +986,7 @@ void Show(not_null<Window::SessionController*> controller) {
 		const auto field = box->addRow(object_ptr<Ui::InputField>(
 			box,
 			st::defaultInputField,
-			rpl::single(Utf("Поиск песен по Telegram"))));
+			rpl::single(Utf("Поиск песен: исполнитель или название"))));
 		const auto now = box->addRow(
 			object_ptr<NowPlaying>(box, state),
 			style::margins(
@@ -816,6 +1022,20 @@ void Show(not_null<Window::SessionController*> controller) {
 			nav->index = -1;
 			*title = Utf("Музыка");
 			content->clear();
+			const auto mixButton = content->add(
+				object_ptr<Ui::RoundButton>(
+					content,
+					rpl::single(Utf("▶  Мой микс")),
+					st::defaultActiveButton),
+				style::margins(
+					st::boxRowPadding.left(),
+					Px(8),
+					st::boxRowPadding.right(),
+					Px(2)),
+				style::al_left);
+			mixButton->setClickedCallback([=] {
+				crl::on_main(box, [=] { nav->mix(); });
+			});
 			addLabel(Utf("ПЛЕЙЛИСТЫ"));
 			content->add(
 				object_ptr<TilesGrid>(
@@ -921,21 +1141,52 @@ void Show(not_null<Window::SessionController*> controller) {
 			});
 		};
 
-		nav->search = [=](QString query) {
-			nav->kind = ViewKind::Search;
-			const auto generation = ++nav->generation;
-			*title = Utf("Поиск");
-			content->clear();
-			const auto status = content->add(
-				object_ptr<Ui::FlatLabel>(
+		// Rows of found songs: a click plays the list from that song on.
+		const auto addFoundRows = [=](std::vector<FullMsgId> ids) {
+			auto added = 0;
+			for (auto i = 0; i != int(ids.size()); ++i) {
+				const auto id = ids[i];
+				const auto document = SongOf(session->data().message(id));
+				if (!document) {
+					continue;
+				}
+				auto songTitle = QString();
+				auto performer = QString();
+				if (const auto song = document->song()) {
+					songTitle = song->title;
+					performer = song->performer;
+				}
+				if (songTitle.isEmpty()) {
+					songTitle = document->filename();
+				}
+				const auto row = content->add(object_ptr<TrackRow>(
 					content,
-					Utf("Ищу в каналах Telegram…"),
-					st::boxDividerLabel),
+					state,
+					id,
+					songTitle,
+					performer,
+					int(document->duration() / 1000),
+					Utf("+ в плейлист")));
+				row->setClickedCallback([=] {
+					Playlists::PlayQueue(session, ids, i);
+				});
+				row->action()->setClickedCallback([=] {
+					SaveAndAddToPlaylist(controller, id);
+				});
+				++added;
+			}
+			return added;
+		};
+		const auto addStatus = [=](const QString &text) {
+			return content->add(
+				object_ptr<Ui::FlatLabel>(content, text, st::boxDividerLabel),
 				style::margins(
 					st::boxRowPadding.left(),
 					Px(10),
 					st::boxRowPadding.right(),
 					Px(6)));
+		};
+		const auto setBackButtons = [=] {
 			box->clearButtons();
 			box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
 				crl::on_main(box, [=] {
@@ -944,55 +1195,85 @@ void Show(not_null<Window::SessionController*> controller) {
 				});
 			});
 			box->addButton(rpl::single(Utf("Закрыть")), [=] { box->closeBox(); });
-			session->api().requestGlobalMedia(
-				Storage::SharedMediaType::MusicFile,
-				query,
-				0,
-				Data::MessagePosition(),
-				false,
-				crl::guard(box, [=](Api::GlobalMediaResult result) {
-					if (nav->generation != generation
-						|| nav->kind != ViewKind::Search) {
-						return;
-					}
-					auto found = 0;
-					for (const auto &position : result.messageIds) {
-						const auto id = position.fullId;
-						const auto document = SongOf(session->data().message(id));
-						if (!document) {
-							continue;
+		};
+
+		nav->search = [=](QString query) {
+			nav->kind = ViewKind::Search;
+			const auto generation = ++nav->generation;
+			*title = Utf("Поиск");
+			content->clear();
+			const auto status = addStatus(Utf("Ищу в музыке Telegram…"));
+			setBackButtons();
+			const auto alive = [=] {
+				return (nav->generation == generation)
+					&& (nav->kind == ViewKind::Search);
+			};
+			const auto found = std::make_shared<int>(0);
+			const auto searchChats = [=] {
+				session->api().requestGlobalMedia(
+					Storage::SharedMediaType::MusicFile,
+					query,
+					0,
+					Data::MessagePosition(),
+					false,
+					crl::guard(box, [=](Api::GlobalMediaResult result) {
+						if (!alive()) {
+							return;
 						}
-						auto songTitle = QString();
-						auto performer = QString();
-						if (const auto song = document->song()) {
-							songTitle = song->title;
-							performer = song->performer;
+						auto ids = std::vector<FullMsgId>();
+						for (const auto &position : result.messageIds) {
+							ids.push_back(position.fullId);
 						}
-						if (songTitle.isEmpty()) {
-							songTitle = document->filename();
+						if (!ids.empty()) {
+							addStatus(Utf("ИЗ ТВОИХ ЧАТОВ"));
 						}
-						const auto row = content->add(object_ptr<TrackRow>(
-							content,
-							state,
-							id,
-							songTitle,
-							performer,
-							int(document->duration() / 1000),
-							Utf("+ в плейлист")));
-						row->setClickedCallback([=] {
-							if (const auto song = SongOf(session->data().message(id))) {
-								::Media::Player::instance()->play(AudioMsgId(song, id));
-							}
-						});
-						row->action()->setClickedCallback([=] {
-							Playlists::ShowAddToPlaylistBox(controller, id);
-						});
-						++found;
-					}
-					status->setText(found
-						? Utf("Нажми на песню, чтобы слушать, «+ в плейлист» — чтобы сохранить.")
-						: Utf("Ничего не нашлось. Попробуй написать иначе."));
-				}));
+						*found += addFoundRows(std::move(ids));
+						status->setText(*found
+							? Utf("Нажми на песню — заиграет список с неё, «+ в плейлист» — сохранить.")
+							: Utf("Ничего не нашлось. Попробуй написать иначе."));
+					}));
+			};
+			SearchBot(session, query, crl::guard(box, [=](
+					std::vector<FullMsgId> ids) {
+				if (!alive()) {
+					return;
+				}
+				*found += addFoundRows(std::move(ids));
+				searchChats();
+			}));
+		};
+
+		nav->mix = [=] {
+			nav->kind = ViewKind::Mix;
+			const auto generation = ++nav->generation;
+			*title = Utf("Мой микс");
+			content->clear();
+			const auto status = addStatus(Utf("Собираю микс из твоих исполнителей…"));
+			setBackButtons();
+			BuildMix(session, crl::guard(box, [=](
+					std::vector<FullMsgId> ids,
+					bool hadArtists) {
+				if (nav->generation != generation || nav->kind != ViewKind::Mix) {
+					return;
+				}
+				if (!addFoundRows(ids)) {
+					status->setText(hadArtists
+						? Utf("Музыкальный поиск Telegram сейчас не ответил. Попробуй ещё раз.")
+						: Utf("Добавь песни в плейлисты — микс соберётся из их исполнителей."));
+					return;
+				}
+				status->setText(Utf("Песни твоих исполнителей вперемешку. Каждый раз новый микс."));
+				box->clearButtons();
+				box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
+					crl::on_main(box, [=] { nav->home(); });
+				});
+				box->addButton(rpl::single(Utf("Ещё микс")), [=] {
+					crl::on_main(box, [=] { nav->mix(); });
+				});
+				box->addButton(rpl::single(Utf("Слушать")), [=] {
+					Playlists::PlayQueue(session, ids, 0);
+				});
+			}));
 		};
 
 		nav->refresh = [=] {

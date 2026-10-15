@@ -278,6 +278,13 @@ jobs:
           maximum-size: 48GB
           disk-root: "D:"
 
+      - name: Stamp build number.
+        if: env.ONLY_CACHE == 'false'
+        shell: bash
+        run: |
+          ROOT="$(cygpath -u "$TBUILD")/$REPO_NAME"
+          printf '#pragma once\n#define MWTK_BUILD_NUMBER %s\n' "${{ github.run_number }}" > "$ROOT/Telegram/SourceFiles/mwtk/mwtk_build.h"
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
@@ -332,6 +339,19 @@ jobs:
           set OUT=%TBUILD%\%REPO_NAME%\out\Release
           mkdir artifact
           move %OUT%\Telegram.exe artifact\MWTKgram.exe
+
+      - name: Build installer.
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found" }
+          $script = "$env:TBUILD\$env:REPO_NAME\Telegram\build\mwtk\setup.iss"
+          & $iscc "/DAppVersion=${{ github.run_number }}" "/DSourceDir=$PWD\artifact" "/DOutputDir=$PWD\installer" $script
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Copy-Item installer\MWTKgram-Setup.exe artifact\MWTKgram-Setup.exe
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         with:
@@ -347,4 +367,4 @@ jobs:
         run: |
           $tag = "build-${{ github.run_number }}"
           Compress-Archive -Path artifact\MWTKgram.exe -DestinationPath MWTKgram-x64.zip -Force
-          gh release create $tag MWTKgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MWTKgram (build ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. Unpack and run MWTKgram.exe." --latest
+          gh release create $tag installer\MWTKgram-Setup.exe MWTKgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "MWTKgram (build ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. MWTKgram-Setup.exe installs the client and updates it later from inside the app; the zip is the portable version." --latest

@@ -56,12 +56,33 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
         this.content = content;
         flyby = new FlybyView(root.getContext());
         root.addView(flyby, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        lift(flyby, 950);
         MwtkLyrics.attach(root);
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.didReceiveNewMessages);
         }
         MwtkConfig.addListener(this::refreshBackdrop);
         refreshBackdrop();
+    }
+
+    /**
+     * Raises an overlay view above all screens. On phones the screens use
+     * elevation and drew over views at Z = 0, so lyrics and banners vanished.
+     */
+    static void lift(View view, int dp) {
+        view.setOutlineProvider(null);
+        view.setTranslationZ(AndroidUtilities.dp(dp));
+    }
+
+    /** «Спрятать чаты»: really hide the app content while the lyrics play. */
+    public static void setContentHidden(boolean hidden) {
+        if (instance == null || instance.content == null) {
+            return;
+        }
+        int visibility = hidden ? View.INVISIBLE : View.VISIBLE;
+        if (instance.content.getVisibility() != visibility) {
+            instance.content.setVisibility(visibility);
+        }
     }
 
     /** The app-wide root layer, or null before the main screen exists. */
@@ -185,6 +206,7 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
         FrameLayout.LayoutParams params = LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 76, Gravity.TOP, 10, 0, 10, 0);
         params.topMargin = AndroidUtilities.statusBarHeight + AndroidUtilities.dp(6);
         root.addView(banner, params);
+        lift(banner, 1000);
         banner.show();
     }
 

@@ -176,6 +176,27 @@ public final class MwtkConfig {
     public static final String RESPECT_ANIMATIONS = "respect_animations";
     public static final String CHAT_FX = "chat_fx";
     public static final String TABLET = "tablet";
+    public static final String LYRICS_APPEAR = "lyrics_appear";
+    public static final String LYRICS_DRIFT = "lyrics_drift";
+    public static final String FLOAT_COUNT = "float_count";
+    public static final String FLOAT_SOURCE = "float_source";
+    public static final String FLOAT_PICKED = "float_picked";
+
+    public static String text(String key, String def) {
+        Object value = cache.get(key);
+        if (value instanceof String) {
+            return (String) value;
+        }
+        String result = prefs().getString(key, def);
+        cache.put(key, result);
+        return result;
+    }
+
+    public static void setText(String key, String value) {
+        prefs().edit().putString(key, value).apply();
+        cache.put(key, value);
+        changed();
+    }
 
     public static boolean flag(String key, boolean def) {
         Object value = cache.get(key);

@@ -2370,6 +2370,9 @@ PRIVATE
     mwtk/mwtk_lyrics.h
     mwtk/mwtk_music.cpp
     mwtk/mwtk_music.h
+    mwtk/mwtk_updater.cpp
+    mwtk/mwtk_updater.h
+    mwtk/mwtk_build.h
     mwtk/mwtk_names.cpp
     mwtk/mwtk_names.h
     mwtk/mwtk_notes.cpp

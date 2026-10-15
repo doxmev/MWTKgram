@@ -23,7 +23,6 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.SettingsActivity;
 
 import java.util.ArrayList;
 import java.util.Random;
@@ -61,15 +60,109 @@ public final class MwtkFloating {
         ImageReceiver image;
         String label;
         long dialogId;
-        int action;
+    }
+
+    /** How many chats fly: «Сколько чатов летает», 5..40. */
+    public static int count() {
+        return Math.max(5, Math.min(40, MwtkConfig.num(MwtkConfig.FLOAT_COUNT, 16)));
+    }
+
+    private static ArrayList<Long> picked() {
+        ArrayList<Long> result = new ArrayList<>();
+        for (String part : MwtkConfig.text(MwtkConfig.FLOAT_PICKED, "").split(",")) {
+            try {
+                if (!part.trim().isEmpty()) {
+                    result.add(Long.parseLong(part.trim()));
+                }
+            } catch (NumberFormatException ignore) {
+            }
+        }
+        return result;
+    }
+
+    /** The chats that fly: recent, pinned or picked by hand. */
+    static ArrayList<Long> chosenDialogs(int account) {
+        int limit = count();
+        int source = MwtkConfig.num(MwtkConfig.FLOAT_SOURCE, 0);
+        ArrayList<Long> result = new ArrayList<>();
+        if (source == 2) {
+            for (long id : picked()) {
+                result.add(id);
+                if (result.size() >= limit) {
+                    break;
+                }
+            }
+            if (!result.isEmpty()) {
+                return result;
+            }
+        }
+        ArrayList<TLRPC.Dialog> dialogs = MwtkHidden.filter(MessagesController.getInstance(account).getDialogs(0));
+        for (TLRPC.Dialog dialog : dialogs) {
+            if (source == 1 && !dialog.pinned) {
+                continue;
+            }
+            result.add(dialog.id);
+            if (result.size() >= limit) {
+                break;
+            }
+        }
+        return result;
+    }
+
+    /** «Выбрать летающие чаты»: tick the chats, the source becomes «Выбрать вручную». */
+    public static void showPickDialog(BaseFragment fragment) {
+        Context context = fragment.getParentActivity();
+        if (context == null) {
+            return;
+        }
+        int account = fragment.getCurrentAccount();
+        MessagesController controller = MessagesController.getInstance(account);
+        ArrayList<TLRPC.Dialog> dialogs = MwtkHidden.filter(controller.getDialogs(0));
+        ArrayList<Long> ids = new ArrayList<>();
+        ArrayList<String> names = new ArrayList<>();
+        ArrayList<Long> already = picked();
+        for (TLRPC.Dialog dialog : dialogs) {
+            TLObject peer = DialogObject.isUserDialog(dialog.id)
+                ? controller.getUser(dialog.id)
+                : controller.getChat(-dialog.id);
+            if (peer == null) {
+                continue;
+            }
+            ids.add(dialog.id);
+            names.add(peer instanceof TLRPC.User
+                ? UserObject.getUserName((TLRPC.User) peer)
+                : MwtkNames.chat((TLRPC.Chat) peer));
+            if (ids.size() >= 300) {
+                break;
+            }
+        }
+        boolean[] checked = new boolean[ids.size()];
+        for (int i = 0; i < ids.size(); i++) {
+            checked[i] = already.contains(ids.get(i));
+        }
+        android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(context);
+        builder.setTitle("Какие чаты летают");
+        builder.setMultiChoiceItems(names.toArray(new String[0]), checked, (d, which, isChecked) -> checked[which] = isChecked);
+        builder.setPositiveButton("Сохранить", (d, which) -> {
+            StringBuilder value = new StringBuilder();
+            for (int i = 0; i < ids.size(); i++) {
+                if (checked[i]) {
+                    if (value.length() > 0) {
+                        value.append(',');
+                    }
+                    value.append(ids.get(i));
+                }
+            }
+            MwtkConfig.setText(MwtkConfig.FLOAT_PICKED, value.toString());
+            MwtkConfig.setNum(MwtkConfig.FLOAT_SOURCE, 2);
+            MwtkUi.toast("Сохранено");
+        });
+        builder.setNegativeButton("Отмена", null);
+        builder.show();
     }
 
     @SuppressLint("ViewConstructor")
     private static final class FloatingView extends View {
-
-        private static final int ACTION_NONE = 0;
-        private static final int ACTION_SETTINGS = 1;
-        private static final int ACTION_CLOSE = 2;
 
         private final BaseFragment fragment;
         private final View list;
@@ -152,26 +245,25 @@ public final class MwtkFloating {
             release();
             int account = fragment.getCurrentAccount();
             MessagesController controller = MessagesController.getInstance(account);
-            ArrayList<TLRPC.Dialog> dialogs = MwtkHidden.filter(controller.getDialogs(0));
             Random random = new Random();
             int w = Math.max(getWidth(), AndroidUtilities.displaySize.x);
             int h = Math.max(getHeight(), AndroidUtilities.displaySize.y);
-            int count = 0;
-            for (TLRPC.Dialog dialog : dialogs) {
-                if (count >= 22) {
-                    break;
-                }
-                TLObject peer = DialogObject.isUserDialog(dialog.id)
-                    ? controller.getUser(dialog.id)
-                    : controller.getChat(-dialog.id);
+            ArrayList<Long> ids = chosenDialogs(account);
+            boolean many = ids.size() > 20;
+            for (long id : ids) {
+                TLObject peer = DialogObject.isUserDialog(id)
+                    ? controller.getUser(id)
+                    : controller.getChat(-id);
                 if (peer == null) {
                     continue;
                 }
+                TLRPC.Dialog dialog = controller.dialogs_dict.get(id);
+                boolean unread = dialog != null && dialog.unread_count > 0;
                 Bubble b = new Bubble();
-                b.dialogId = dialog.id;
-                b.r = AndroidUtilities.dp(dialog.unread_count > 0 ? 34 : 28);
-                b.x = b.r + random.nextFloat() * (w - b.r * 2);
-                b.y = b.r + random.nextFloat() * (h - b.r * 2);
+                b.dialogId = id;
+                b.r = AndroidUtilities.dp((many ? 22 : 28) + (unread ? 6 : 0));
+                b.x = b.r + random.nextFloat() * Math.max(1, w - b.r * 2);
+                b.y = b.r + random.nextFloat() * Math.max(1, h - b.r * 2);
                 b.vx = (random.nextFloat() - 0.5f) * AndroidUtilities.dp(200);
                 b.vy = (random.nextFloat() - 0.5f) * AndroidUtilities.dp(200);
                 b.image = new ImageReceiver(this);
@@ -184,20 +276,7 @@ public final class MwtkFloating {
                     ? UserObject.getFirstName((TLRPC.User) peer)
                     : MwtkNames.chat((TLRPC.Chat) peer);
                 bubbles.add(b);
-                count++;
             }
-            addAction(w, h, ACTION_SETTINGS, "⚙");
-            addAction(w, h, ACTION_CLOSE, "✕");
-        }
-
-        private void addAction(int w, int h, int action, String label) {
-            Bubble b = new Bubble();
-            b.action = action;
-            b.label = label;
-            b.r = AndroidUtilities.dp(24);
-            b.x = w / 2f + (action == ACTION_CLOSE ? b.r * 2 : -b.r * 2);
-            b.y = h - b.r * 3;
-            bubbles.add(b);
         }
 
         @Override
@@ -220,11 +299,6 @@ public final class MwtkFloating {
                         label = label.substring(0, 11) + "…";
                     }
                     canvas.drawText(label, b.x, b.y + b.r + AndroidUtilities.dp(14), text);
-                } else {
-                    paint.setAlpha(230);
-                    canvas.drawCircle(b.x, b.y, b.r, paint);
-                    text.setTextSize(AndroidUtilities.dp(20));
-                    canvas.drawText(b.label, b.x, b.y + AndroidUtilities.dp(7), text);
                 }
             }
             if (active) {
@@ -238,13 +312,6 @@ public final class MwtkFloating {
             }
             // No tilt and no gravity: on some phones the sensor pinned every
             // bubble to the bottom. Bubbles drift and bounce on their own.
-            // ⚙ and ✕ always sit at the bottom center of the real size.
-            for (Bubble b : bubbles) {
-                if (b.action != ACTION_NONE) {
-                    b.x = getWidth() / 2f + (b.action == ACTION_CLOSE ? b.r * 2 : -b.r * 2);
-                    b.y = getHeight() - b.r * 3;
-                }
-            }
             float minSpeed = AndroidUtilities.dp(18);
             float maxSpeed = AndroidUtilities.dp(1400);
             int w = getWidth();
@@ -253,7 +320,7 @@ public final class MwtkFloating {
                 return; // just moved to another parent, not laid out yet
             }
             for (Bubble b : bubbles) {
-                if (b == dragged || b.action != ACTION_NONE) {
+                if (b == dragged) {
                     continue;
                 }
                 b.vx *= 0.992f;
@@ -286,8 +353,8 @@ public final class MwtkFloating {
                         float d = (float) Math.sqrt(d2);
                         float push = (min - d) / 2f;
                         float nx = dx / d, ny = dy / d;
-                        boolean aFixed = a == dragged || a.action != ACTION_NONE;
-                        boolean bFixed = b == dragged || b.action != ACTION_NONE;
+                        boolean aFixed = a == dragged;
+                        boolean bFixed = b == dragged;
                         if (aFixed && bFixed) {
                             continue;
                         }
@@ -334,7 +401,7 @@ public final class MwtkFloating {
                     if (tracker != null) {
                         tracker.addMovement(event);
                     }
-                    if (dragged != null && dragged.action == ACTION_NONE) {
+                    if (dragged != null) {
                         dragged.x = event.getX();
                         dragged.y = event.getY();
                     }
@@ -343,7 +410,9 @@ public final class MwtkFloating {
                 case MotionEvent.ACTION_CANCEL:
                     boolean tap = Math.abs(event.getX() - downX) < AndroidUtilities.dp(10)
                         && Math.abs(event.getY() - downY) < AndroidUtilities.dp(10);
-                    if (dragged != null) {
+                    if (dragged == null && tap && event.getActionMasked() == MotionEvent.ACTION_UP) {
+                        toggle(); // a tap on the empty space closes the mode
+                    } else if (dragged != null) {
                         if (tap && event.getActionMasked() == MotionEvent.ACTION_UP) {
                             open(dragged);
                         } else if (tracker != null) {
@@ -364,14 +433,9 @@ public final class MwtkFloating {
         }
 
         private void open(Bubble b) {
-            if (b.action == ACTION_CLOSE) {
-                toggle();
-                return;
-            }
-            if (b.action == ACTION_SETTINGS) {
-                fragment.presentFragment(new SettingsActivity());
-                return;
-            }
+            // Open the chat and leave the floating mode, so the bubbles are
+            // not still there when you come back from the chat.
+            toggle();
             Bundle args = new Bundle();
             if (DialogObject.isUserDialog(b.dialogId)) {
                 args.putLong("user_id", b.dialogId);

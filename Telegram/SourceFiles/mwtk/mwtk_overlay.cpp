@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_appear.h"
 #include "mwtk/mwtk_appicon.h"
 #include "mwtk/mwtk_floating.h"
+#include "mwtk/mwtk_updater.h"
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_hotkeys.h"
 #include "mwtk/mwtk_lyrics.h"
@@ -1003,6 +1004,7 @@ void VisualsWidget::paintContent(QPainter &p, const QRegion &clip) {
 void SetupOverlay(not_null<Ui::RpWidget*> body) {
 	SetupChatStyle();
 	const auto overlay = Ui::CreateChild<VisualsWidget>(body.get(), true);
+	overlay->setObjectName(u"mwtk-overlay"_q);
 	body->sizeValue(
 	) | rpl::on_next([=](QSize size) {
 		overlay->setGeometry(QRect(QPoint(), size));
@@ -1024,6 +1026,7 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 	Lyrics::Setup(body);
 	Hidden::Setup();
 	Floating::Setup();
+	Updater::Setup();
 	Core::App().domain().activeSessionValue(
 	) | rpl::map([](Main::Session *session) {
 		return session

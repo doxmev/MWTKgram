@@ -53,6 +53,13 @@ void Play(
 	int track,
 	bool shuffle);
 
+// Plays messages one after another without saving them as a playlist
+// (search results, «Мой микс»).
+void PlayQueue(
+	not_null<Main::Session*> session,
+	std::vector<FullMsgId> items,
+	int start);
+
 // Hooks for Media::Player::Instance.
 [[nodiscard]] bool Owns(const AudioMsgId &current);
 [[nodiscard]] bool HandleMove(const AudioMsgId &current, int delta);

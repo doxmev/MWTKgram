@@ -434,6 +434,41 @@ base::options::option<int> OptionLyricsSize({
 	.defaultValue = 100,
 });
 
+base::options::option<int> OptionLyricsAppear({
+	.id = kOptionLyricsAppear,
+	.name = "MWTKgram lyrics appear",
+	.description = "0 scattered, 1 center, 2 edges, 3 bottom, 4 from the cover.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionLyricsDrift({
+	.id = kOptionLyricsDrift,
+	.name = "MWTKgram lyrics drift",
+	.description = "0 float, 1 wave, 2 spiral, 3 shake on beat.",
+	.defaultValue = 0,
+});
+
+base::options::option<int> OptionFloatCount({
+	.id = kOptionFloatCount,
+	.name = "MWTKgram floating chats count",
+	.description = "How many chats fly.",
+	.defaultValue = 16,
+});
+
+base::options::option<int> OptionFloatSource({
+	.id = kOptionFloatSource,
+	.name = "MWTKgram floating chats source",
+	.description = "0 recent, 1 pinned, 2 picked.",
+	.defaultValue = 0,
+});
+
+base::options::option<QString> OptionFloatPicked({
+	.id = kOptionFloatPicked,
+	.name = "MWTKgram floating chats picked",
+	.description = "Serialized peer ids, comma separated.",
+	.defaultValue = QString(),
+});
+
 base::options::toggle OptionHideChats({
 	.id = kOptionHideChats,
 	.name = "MWTKgram hide chats for lyrics",
@@ -544,6 +579,11 @@ const char kOptionLyricsVanish[] = "mwtk-lyrics-vanish";
 const char kOptionLyricsStyle[] = "mwtk-lyrics-style";
 const char kOptionLyricsMotion[] = "mwtk-lyrics-motion";
 const char kOptionLyricsSize[] = "mwtk-lyrics-size";
+const char kOptionLyricsAppear[] = "mwtk-lyrics-appear";
+const char kOptionLyricsDrift[] = "mwtk-lyrics-drift";
+const char kOptionFloatCount[] = "mwtk-float-count";
+const char kOptionFloatSource[] = "mwtk-float-source";
+const char kOptionFloatPicked[] = "mwtk-float-picked";
 const char kOptionHideChats[] = "mwtk-hide-chats";
 const char kOptionMusicPulse[] = "mwtk-music-pulse";
 const char kOptionSeasons[] = "mwtk-seasons";
@@ -984,6 +1024,11 @@ std::vector<const char*> AllOptionIds() {
 		kOptionLyricsStyle,
 		kOptionLyricsMotion,
 		kOptionLyricsSize,
+		kOptionLyricsAppear,
+		kOptionLyricsDrift,
+		kOptionFloatCount,
+		kOptionFloatSource,
+		kOptionFloatPicked,
 		kOptionHideChats,
 		kOptionMusicPulse,
 		kOptionSeasons,

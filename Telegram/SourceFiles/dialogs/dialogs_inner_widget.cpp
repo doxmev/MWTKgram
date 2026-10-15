@@ -4663,6 +4663,11 @@ void InnerWidget::visibleTopBottomUpdated(
 		&& (_state == WidgetState::Default)) {
 		_rowsScrollCache.markScrolling();
 	}
+	if (_visibleTop != visibleTop || _visibleBottom != visibleBottom) {
+		// MWTK: cards, glows and the see-through background do not survive
+		// the scroll blit, so repaint the whole visible part of the list.
+		update(0, visibleTop, width(), visibleBottom - visibleTop);
+	}
 	_visibleTop = visibleTop;
 	_visibleBottom = visibleBottom;
 	preloadRowsData();

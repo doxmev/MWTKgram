@@ -69,6 +69,8 @@ public class MwtkMusicActivity extends BaseFragment {
     private int openPlaylist = -1;
     private int searchRequest;
     private final ArrayList<MessageObject> results = new ArrayList<>();
+    private String resultsTitle = "Найдено";
+    private int searchGeneration;
     private final Runnable tick = this::tick;
 
     @Override
@@ -96,7 +98,7 @@ public class MwtkMusicActivity extends BaseFragment {
         root.addView(column, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         search = new EditText(context);
-        search.setHint("Поиск песен по Telegram");
+        search.setHint("Поиск песен: исполнитель или название");
         search.setHintTextColor(0x66ffffff);
         search.setTextColor(0xffffffff);
         search.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
@@ -203,14 +205,14 @@ public class MwtkMusicActivity extends BaseFragment {
             return;
         }
         if (!results.isEmpty()) {
-            actionBar.setTitle("Поиск");
-            content.addView(label(context, "Найдено в Telegram"));
+            actionBar.setTitle(resultsTitle);
+            content.addView(label(context, resultsTitle));
             for (int i = 0; i < results.size(); i++) {
                 MessageObject message = results.get(i);
                 TrackRow row = new TrackRow(context);
                 row.bind(message, message.getMusicTitle(), message.getMusicAuthor(), (int) message.getDuration(), "＋");
                 row.setOnClickListener(v -> MwtkPlaylists.playMessages(results, message));
-                row.action.setOnClickListener(v -> MwtkPlaylists.showAddBox(this, message));
+                row.action.setOnClickListener(v -> MwtkMusicBot.saveAndAdd(this, message));
                 content.addView(row);
             }
             return;
@@ -221,6 +223,17 @@ public class MwtkMusicActivity extends BaseFragment {
         }
         openPlaylist = -1;
         actionBar.setTitle("Музыка");
+        TextView mix = new TextView(context);
+        mix.setText("▶  Мой микс");
+        mix.setTextColor(0xffffffff);
+        mix.setTextSize(15);
+        mix.setTypeface(AndroidUtilities.bold());
+        mix.setGravity(Gravity.CENTER);
+        GradientDrawable mixBg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[] { ACCENT, 0xff8a1230 });
+        mixBg.setCornerRadius(AndroidUtilities.dp(14));
+        mix.setBackground(mixBg);
+        mix.setOnClickListener(v -> runMix());
+        content.addView(mix, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 12, 10, 12, 2));
         content.addView(label(context, "Плейлисты"));
         int count = MwtkPlaylists.count();
         LinearLayout row = null;
@@ -488,47 +501,81 @@ public class MwtkMusicActivity extends BaseFragment {
 
     // ------------------------------------------------------------ search
 
+    private void showResults(String title, ArrayList<MessageObject> found) {
+        resultsTitle = title;
+        results.clear();
+        results.addAll(found);
+        rebuild();
+        if (scroll != null) {
+            scroll.scrollTo(0, 0);
+        }
+    }
+
+    private void runMix() {
+        int generation = ++searchGeneration;
+        MwtkUi.toast("Собираю микс из твоих исполнителей…");
+        MwtkMusicBot.mix(currentAccount, (songs, hadArtists) -> {
+            if (generation != searchGeneration || getParentActivity() == null) {
+                return;
+            }
+            if (songs.isEmpty()) {
+                MwtkUi.toast(hadArtists
+                    ? "Музыкальный поиск Telegram не ответил, попробуй ещё раз"
+                    : "Добавь песни в плейлисты — микс соберётся из их исполнителей");
+                return;
+            }
+            showResults("Мой микс", songs);
+            MwtkPlaylists.playMessages(results, results.get(0));
+        });
+    }
+
     private void runSearch(String query) {
         if (query.isEmpty()) {
             return;
         }
         if (searchRequest != 0) {
             ConnectionsManager.getInstance(currentAccount).cancelRequest(searchRequest, true);
+            searchRequest = 0;
         }
-        TLRPC.TL_messages_searchGlobal req = new TLRPC.TL_messages_searchGlobal();
-        req.filter = new TLRPC.TL_inputMessagesFilterMusic();
-        req.q = query;
-        req.limit = 40;
-        req.offset_rate = 0;
-        req.offset_id = 0;
-        req.offset_peer = new TLRPC.TL_inputPeerEmpty();
+        int generation = ++searchGeneration;
         MwtkUi.toast("Ищу…");
         final int account = currentAccount;
-        searchRequest = ConnectionsManager.getInstance(account).sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
-            searchRequest = 0;
-            ArrayList<MessageObject> found = new ArrayList<>();
-            if (res instanceof TLRPC.messages_Messages) {
-                TLRPC.messages_Messages r = (TLRPC.messages_Messages) res;
-                MessagesController.getInstance(account).putUsers(r.users, false);
-                MessagesController.getInstance(account).putChats(r.chats, false);
-                for (TLRPC.Message message : r.messages) {
-                    MessageObject object = new MessageObject(account, message, false, true);
-                    if (object.isMusic()) {
-                        found.add(object);
-                    }
-                }
-            }
-            if (found.isEmpty()) {
-                MwtkUi.toast(err != null ? "Не получилось выполнить поиск" : "Ничего не нашлось");
+        // First the official music search of Telegram, then the chats you are in.
+        MwtkMusicBot.search(account, query, botSongs -> {
+            if (generation != searchGeneration) {
                 return;
             }
-            results.clear();
-            results.addAll(found);
-            rebuild();
-            if (scroll != null) {
-                scroll.scrollTo(0, 0);
-            }
-        }));
+            TLRPC.TL_messages_searchGlobal req = new TLRPC.TL_messages_searchGlobal();
+            req.filter = new TLRPC.TL_inputMessagesFilterMusic();
+            req.q = query;
+            req.limit = 40;
+            req.offset_rate = 0;
+            req.offset_id = 0;
+            req.offset_peer = new TLRPC.TL_inputPeerEmpty();
+            searchRequest = ConnectionsManager.getInstance(account).sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
+                searchRequest = 0;
+                if (generation != searchGeneration) {
+                    return;
+                }
+                ArrayList<MessageObject> found = new ArrayList<>(botSongs);
+                if (res instanceof TLRPC.messages_Messages) {
+                    TLRPC.messages_Messages r = (TLRPC.messages_Messages) res;
+                    MessagesController.getInstance(account).putUsers(r.users, false);
+                    MessagesController.getInstance(account).putChats(r.chats, false);
+                    for (TLRPC.Message message : r.messages) {
+                        MessageObject object = new MessageObject(account, message, false, true);
+                        if (object.isMusic()) {
+                            found.add(object);
+                        }
+                    }
+                }
+                if (found.isEmpty()) {
+                    MwtkUi.toast(err != null && botSongs.isEmpty() ? "Не получилось выполнить поиск" : "Ничего не нашлось");
+                    return;
+                }
+                showResults("Найдено", found);
+            }));
+        });
     }
 
     // ------------------------------------------------------------ player

@@ -22,6 +22,22 @@ public final class MwtkBeat {
     private static long lastPoll;
     private static boolean failed;
     private static final byte[] wave = new byte[512];
+    private static final byte[] fft = new byte[512];
+    private static final int BANDS = 48;
+    private static final float[] bands = new float[BANDS];
+    private static float loudness;
+
+    /** Smoothed spectrum bars (0..1) for the lyrics visualizer, low to high. */
+    public static float[] bands() {
+        level();
+        return bands;
+    }
+
+    /** Current loudness 0..1, for when the spectrum is not available. */
+    public static float loudness() {
+        level();
+        return loudness;
+    }
 
     private MwtkBeat() {
     }
@@ -43,6 +59,8 @@ public final class MwtkBeat {
         if (!music || failed || !allowed()) {
             release();
             beat = 0;
+            loudness = 0;
+            java.util.Arrays.fill(bands, 0f);
             return 0;
         }
         try {
@@ -60,6 +78,23 @@ public final class MwtkBeat {
                 sum += v * v;
             }
             float level = (float) Math.sqrt(sum / wave.length) * 2.2f;
+            loudness = Math.min(1f, level);
+            if (visualizer.getFft(fft) == Visualizer.SUCCESS) {
+                // Log-spaced bands over the first half of the spectrum.
+                int bins = fft.length / 2;
+                for (int i = 0; i < BANDS; i++) {
+                    int from = (int) Math.max(1, Math.pow(bins, (double) i / BANDS));
+                    int to = (int) Math.max(from + 1, Math.pow(bins, (double) (i + 1) / BANDS));
+                    float peak = 0;
+                    for (int k = from; k < to && k < bins; k++) {
+                        float re = fft[k * 2];
+                        float im = fft[k * 2 + 1];
+                        peak = Math.max(peak, (float) Math.hypot(re, im));
+                    }
+                    float value = Math.min(1f, (float) (Math.log10(1 + peak) / 2.1));
+                    bands[i] = value > bands[i] ? value : bands[i] + (value - bands[i]) * Math.min(1f, dt * 6f);
+                }
+            }
             average += (level - average) * Math.min(dt * 2.5f, 1f);
             float hit = Math.max(0f, Math.min(1f, (level - average * 1.05f) * 5f));
             beat = Math.max(hit, beat * (float) Math.exp(-dt * 7f));

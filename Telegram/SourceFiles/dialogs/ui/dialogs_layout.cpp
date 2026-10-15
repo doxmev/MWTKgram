@@ -558,6 +558,9 @@ void PaintRow(
 				&& item
 				&& !item->isEmpty()));
 	}
+	// MWTK: halos stay inside the row, otherwise scrolling leaves stripes.
+	p.save();
+	p.setClipRect(geometry, Qt::IntersectClip);
 	if (from
 		&& (flags & Flag::AllowUserOnline)
 		&& !(flags & (Flag::SavedMessages | Flag::RepliesMessages | Flag::MyNotes | Flag::HiddenAuthor))) {
@@ -586,6 +589,7 @@ void PaintRow(
 				context.st->photoSize),
 			from);
 	}
+	p.restore();
 
 	const auto nameleft = context.st->nameLeft;
 	if (context.topicsExpanded > 0.) {

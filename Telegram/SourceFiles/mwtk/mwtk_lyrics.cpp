@@ -6,6 +6,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mwtk/mwtk_lyrics.h"
 
+#include "base/algorithm.h"
+#include "core/file_utilities.h"
+#include "ui/basic_click_handlers.h"
 #include "base/event_filter.h"
 #include "base/options.h"
 #include "base/timer.h"
@@ -596,6 +599,11 @@ private:
 	crl::time _coverFrame = 0;
 	float64 _coverBeat = 0.;
 	QRegion _painted; // what the last frame drew, repainted next frame
+	float64 _beat = 0.; // 0..1, a kick in the music
+	float64 _levelAverage = 0.;
+	std::vector<QPointer<QWidget>> _hiddenWidgets; // "hide chats" really hides
+	void applyHideChats(bool hide);
+	void paintBars(QPainter &p, QRectF area, crl::time now);
 	[[nodiscard]] QRegion expectedRegion(crl::time now) const;
 	crl::time _statePosition = 0;
 	crl::time _stateAt = 0;
@@ -618,6 +626,8 @@ LyricsWidget::LyricsWidget(QWidget *parent)
 		OptionChanges(kOptionLyricsVanish),
 		OptionChanges(kOptionLyricsStyle),
 		OptionChanges(kOptionLyricsSize),
+		OptionChanges(kOptionLyricsAppear),
+		OptionChanges(kOptionLyricsDrift),
 		OptionChanges(kOptionHideChats),
 		OptionChanges(kOptionPalette),
 		ConfigChanges(),
@@ -672,11 +682,43 @@ void LyricsWidget::refresh() {
 	setAttribute(Qt::WA_TransparentForMouseEvents, !hide);
 	setAttribute(Qt::WA_OpaquePaintEvent, hide);
 	setVisible(_enabled && _document && !Current().lines.empty());
+	applyHideChats(hide && isVisible());
 	if (isVisible()) {
 		raise();
 	}
 	wake();
 	update();
+}
+
+void LyricsWidget::applyHideChats(bool hide) {
+	if (!hide) {
+		for (const auto &widget : base::take(_hiddenWidgets)) {
+			if (widget) {
+				widget->show();
+			}
+		}
+		return;
+	}
+	const auto parent = parentWidget();
+	if (!_hiddenWidgets.empty() || !parent) {
+		return;
+	}
+	// Really hide the chats (not just paint over them): Telegram stops
+	// drawing them, and they come back exactly as they were.
+	for (const auto child : parent->children()) {
+		const auto widget = qobject_cast<QWidget*>(child);
+		if (!widget
+			|| widget == this
+			|| widget->isWindow()
+			|| widget->isHidden()
+			|| widget->objectName().startsWith(u"mwtk-"_q)) {
+			continue;
+		}
+		_hiddenWidgets.push_back(widget);
+		widget->hide();
+	}
+	raise();
+	setFocus();
 }
 
 void LyricsWidget::onState(const ::Media::Player::TrackState &state) {
@@ -732,6 +774,14 @@ void LyricsWidget::tick() {
 		|| (window->windowState() & Qt::WindowMinimized)) {
 		_timer.cancel();
 		return;
+	}
+	{
+		// A beat is loudness above the recent average; it fades fast.
+		const auto mixer = ::Media::Player::mixer();
+		const auto level = (_playing && mixer) ? mixer->songLevel() : 0.;
+		_levelAverage += (level - _levelAverage) * std::min(dt * 2.5, 1.);
+		const auto kick = std::clamp((level - _levelAverage * 1.05) * 5., 0., 1.);
+		_beat = std::max(kick, _beat * std::exp(-dt * 7.));
 	}
 	for (auto &particle : _particles) {
 		particle.life -= dt / 1.1;
@@ -824,29 +874,53 @@ LineLayout LyricsWidget::layoutLine(int index) const {
 		? QPointF(w / 2., h * 0.42)
 		: QPointF(w * (0.5 + (r() - 0.5) * 0.25), h * (0.40 + (r() - 0.5) * 0.18)));
 
-	const auto measure = [&](Word &word, double pixelSize) {
+	auto widths = std::vector<double>(result.words.size(), 0.);
+	const auto measure = [&](int i, double pixelSize) {
+		auto &word = result.words[i];
 		word.size = pixelSize;
-		return QFontMetrics(WordFont(style, int(pixelSize))).horizontalAdvance(word.text);
+		widths[i] = QFontMetrics(
+			WordFont(style, int(pixelSize))).horizontalAdvance(word.text);
+		return widths[i];
 	};
+	const auto count = int(result.words.size());
+	const auto maxRow = w * 0.9;
 	if (layout == 2) {
-		auto widths = std::vector<double>();
-		auto full = 0.;
-		const auto space = QFontMetrics(WordFont(style, int(base))).horizontalAdvance(' ');
-		for (auto &word : result.words) {
-			widths.push_back(measure(word, base));
-			full += widths.back() + space;
+		// One line, wrapped into rows when it does not fit the screen.
+		const auto space = QFontMetrics(
+			WordFont(style, int(base))).horizontalAdvance(' ');
+		auto rows = std::vector<std::vector<int>>(1);
+		auto rowWidth = 0.;
+		for (auto i = 0; i != count; ++i) {
+			const auto ww = measure(i, base);
+			if (!rows.back().empty() && rowWidth + space + ww > maxRow) {
+				rows.emplace_back();
+				rowWidth = 0.;
+			}
+			rowWidth += (rows.back().empty() ? 0. : space) + ww;
+			rows.back().push_back(i);
 		}
-		auto x = center.x() - full / 2.;
-		for (auto i = 0; i != result.words.size(); ++i) {
-			result.words[i].position = QPointF(x + widths[i] / 2., center.y());
-			x += widths[i] + space;
+		const auto rowHeight = base * 1.3;
+		for (auto ri = 0; ri != int(rows.size()); ++ri) {
+			auto full = 0.;
+			for (const auto i : rows[ri]) {
+				full += widths[i];
+			}
+			full += space * (int(rows[ri].size()) - 1);
+			auto x = center.x() - full / 2.;
+			const auto y = center.y()
+				+ (ri - (int(rows.size()) - 1) / 2.) * rowHeight;
+			for (const auto i : rows[ri]) {
+				result.words[i].position = QPointF(x + widths[i] / 2., y);
+				x += widths[i] + space;
+			}
 		}
 	} else if (layout == 1) {
 		auto x = 0.;
 		auto y = 0.;
 		auto right = 0.;
-		for (auto &word : result.words) {
-			const auto ww = measure(word, base * (0.85 + r() * 0.35));
+		for (auto i = 0; i != count; ++i) {
+			auto &word = result.words[i];
+			const auto ww = measure(i, base * (0.85 + r() * 0.35));
 			word.position = QPointF(x + ww / 2., y);
 			word.rotation = (r() - 0.5) * 0.08;
 			right = std::max(right, x + ww);
@@ -859,37 +933,127 @@ LineLayout LyricsWidget::layoutLine(int index) const {
 	} else {
 		auto rows = std::vector<std::vector<int>>();
 		auto row = std::vector<int>();
-		for (auto i = 0; i != result.words.size(); ++i) {
+		auto rowWidth = 0.;
+		for (auto i = 0; i != count; ++i) {
+			const auto estimate = QFontMetrics(
+				WordFont(style, int(base))).horizontalAdvance(result.words[i].text);
+			if (!row.empty() && rowWidth + estimate > maxRow) {
+				rows.push_back(std::move(row));
+				row = {};
+				rowWidth = 0.;
+			}
 			row.push_back(i);
+			rowWidth += estimate + base * 0.45;
 			if (row.size() >= size_t(1 + int(r() * 3))) {
 				rows.push_back(std::move(row));
 				row = {};
+				rowWidth = 0.;
 			}
 		}
 		if (!row.empty()) {
 			rows.push_back(std::move(row));
 		}
 		const auto rowHeight = base * 1.25;
-		for (auto ri = 0; ri != rows.size(); ++ri) {
-			auto widths = std::vector<double>();
+		for (auto ri = 0; ri != int(rows.size()); ++ri) {
+			auto rowWidths = std::vector<double>();
 			auto total = 0.;
 			for (const auto i : rows[ri]) {
-				widths.push_back(measure(result.words[i], base * (0.8 + r() * 0.5)));
-				total += widths.back();
+				rowWidths.push_back(measure(i, base * (0.8 + r() * 0.5)));
+				total += rowWidths.back();
 			}
 			const auto gap = base * 0.45;
-			total += gap * (rows[ri].size() - 1);
+			total += gap * (int(rows[ri].size()) - 1);
 			auto x = -total / 2. + (r() - 0.5) * base * 2.;
-			for (auto k = 0; k != rows[ri].size(); ++k) {
+			for (auto k = 0; k != int(rows[ri].size()); ++k) {
 				auto &word = result.words[rows[ri][k]];
 				word.position = QPointF(
-					center.x() + x + widths[k] / 2.,
+					center.x() + x + rowWidths[k] / 2.,
 					center.y()
-						+ (ri - (rows.size() - 1) / 2.) * rowHeight
+						+ (ri - (int(rows.size()) - 1) / 2.) * rowHeight
 						+ (r() - 0.5) * base * 0.5);
 				word.rotation = (r() - 0.5) * 0.22;
-				x += widths[k] + gap;
+				x += rowWidths[k] + gap;
 			}
+		}
+	}
+
+	// Never leave the screen: shrink the whole line to fit, then move it in.
+	if (count > 0) {
+		auto bounds = QRectF();
+		const auto boundsOf = [&] {
+			auto result_ = QRectF();
+			for (auto i = 0; i != count; ++i) {
+				const auto &word = result.words[i];
+				const auto hh = word.size * 1.3;
+				result_ = result_.united(QRectF(
+					word.position.x() - widths[i] / 2.,
+					word.position.y() - hh / 2.,
+					widths[i],
+					hh));
+			}
+			return result_;
+		};
+		bounds = boundsOf();
+		const auto fit = std::min({
+			1.,
+			(w * 0.94) / std::max(bounds.width(), 1.),
+			(h * 0.9) / std::max(bounds.height(), 1.),
+		});
+		if (fit < 0.999) {
+			const auto origin = bounds.center();
+			for (auto i = 0; i != count; ++i) {
+				auto &word = result.words[i];
+				word.size = std::max(word.size * fit, 10.);
+				widths[i] *= fit;
+				word.position = origin + (word.position - origin) * fit;
+			}
+			bounds = boundsOf();
+		}
+		auto shift = QPointF();
+		if (bounds.left() < area.left()) {
+			shift.setX(area.left() - bounds.left());
+		} else if (bounds.right() > area.right()) {
+			shift.setX(area.right() - bounds.right());
+		}
+		if (bounds.top() < area.top()) {
+			shift.setY(area.top() - bounds.top());
+		} else if (bounds.bottom() > area.bottom()) {
+			shift.setY(area.bottom() - bounds.bottom());
+		}
+		for (auto &word : result.words) {
+			word.position += shift;
+		}
+	}
+
+	// Where the words fly in from.
+	const auto appear = std::clamp(OptionInt(kOptionLyricsAppear), 0, 4);
+	const auto areaCenter = area.center();
+	for (auto &word : result.words) {
+		switch (appear) {
+		case 1:
+			word.from = areaCenter - word.position;
+			break;
+		case 2: {
+			const auto fromLeft = (word.position.x() < areaCenter.x());
+			word.from = QPointF(
+				fromLeft
+					? (area.left() - word.position.x() - base * 2.)
+					: (area.right() - word.position.x() + base * 2.),
+				(r() - 0.5) * base);
+		} break;
+		case 3:
+			word.from = QPointF(
+				(r() - 0.5) * base * 2.,
+				area.bottom() - word.position.y() + base * 2.);
+			break;
+		case 4: {
+			const auto source = hideMode()
+				? coverTarget(coverModeFor(index)).center()
+				: areaCenter;
+			word.from = source - word.position;
+		} break;
+		default:
+			break; // Scattered: a random direction, set above.
 		}
 	}
 	for (auto &word : result.words) {
@@ -969,16 +1133,40 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 	const auto appear = word.start - kAppearAhead;
 	const auto k = std::clamp((now - appear) / double(kFlyIn), 0., 1.);
 	const auto ease = 1. - std::pow(1. - k, 3.);
-	const auto onScreen = (now - word.start) / 1000.;
-	auto position = word.position
-		+ word.from * (1. - ease)
-		+ QPointF(
+	const auto onScreen = std::max((now - word.start) / 1000., 0.);
+	const auto drift = std::clamp(OptionInt(kOptionLyricsDrift), 0, 3);
+	auto offset = QPointF();
+	switch (drift) {
+	case 1: // Wave: the line rolls like a wave from left to right.
+		offset = QPointF(
+			std::sin(seconds * 0.7 + word.phase) * 4. * motion,
+			std::sin(seconds * 2.4 - word.position.x() / 70.) * 14. * motion);
+		break;
+	case 2: { // Spiral: each word circles slowly outward.
+		const auto radius = (6. + onScreen * 7.) * motion;
+		const auto angle = seconds * 1.7 + word.phase;
+		offset = QPointF(std::cos(angle) * radius, std::sin(angle) * radius);
+	} break;
+	case 3: // Shake on the beat.
+		offset = QPointF(
+			std::sin(seconds * 37. + word.phase * 5.) * 9. * _beat,
+			std::cos(seconds * 41. + word.phase * 3.) * 7. * _beat)
+			+ QPointF(
+				std::sin(seconds * 0.9 + word.phase) * 3. * motion,
+				std::cos(seconds * 1.1 + word.phase) * 3. * motion);
+		break;
+	default: // Float: a slow drift up and to the side.
+		offset = QPointF(
 			std::sin(seconds * 0.9 + word.phase) * 6. * motion
 				+ onScreen * 3. * motion * std::cos(word.phase),
 			std::cos(seconds * 1.1 + word.phase) * 5. * motion
 				- onScreen * 2. * motion);
+		break;
+	}
+	auto position = word.position + word.from * (1. - ease) + offset;
 	auto opacity = ease;
-	auto scale = 0.3 + 0.7 * ease;
+	const auto singing = (now >= word.start && now < word.out);
+	auto scale = (0.3 + 0.7 * ease) * (1. + (singing ? 0.14 : 0.06) * _beat);
 	if (now >= word.out) {
 		const auto v = std::clamp((now - word.out) / double(kVanish), 0., 1.);
 		opacity *= 1. - v;
@@ -1028,7 +1216,7 @@ QRegion LyricsWidget::expectedRegion(crl::time now) const {
 				continue;
 			}
 			const auto size = QSizeF(word.dim.size()) / word.dim.devicePixelRatio();
-			const auto r = std::max(size.width(), size.height()) * 0.7 + 24.;
+			const auto r = std::max(size.width(), size.height()) * 0.8 + 64.;
 			const auto flying = (now < word.start - kAppearAhead + kFlyIn);
 			auto rect = QRectF(word.position - QPointF(r, r), QSizeF(2 * r, 2 * r));
 			if (flying) {
@@ -1107,6 +1295,16 @@ void LyricsWidget::paintEvent(QPaintEvent *e) {
 		}
 		p.setOpacity(1.);
 	}
+	if (hideMode()) {
+		const auto &lines = Current().lines;
+		auto current = 0;
+		for (auto i = 0; i != int(lines.size()); ++i) {
+			if (lines[i].at <= now) {
+				current = i;
+			}
+		}
+		paintBars(p, lyricsArea(current), now);
+	}
 }
 
 void LyricsWidget::resetCover() {
@@ -1118,9 +1316,9 @@ void LyricsWidget::resetCover() {
 
 int LyricsWidget::coverModeFor(int index) const {
 	// 0: cover on top, text below; 1: cover left; 2: cover right.
-	// The side changes every four lines so the eye can follow it.
+	// The side changes every two lines.
 	const auto &state = Current();
-	const auto seed = uint32(qHash(state.track.key)) + uint32(index / 4) * 2654435761u;
+	const auto seed = uint32(qHash(state.track.key)) + uint32(index / 2) * 2654435761u;
 	return int(seed % 3u);
 }
 
@@ -1174,14 +1372,17 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 		}
 	}
 	const auto mode = coverModeFor(current);
-	const auto target = coverTarget(mode);
 	const auto frame = crl::now();
+	const auto t = frame / 1000.;
+	const auto target = coverTarget(mode).translated(
+		std::sin(t * 0.23) * width() * 0.035 + std::sin(t * 0.61) * width() * 0.01,
+		std::cos(t * 0.31) * height() * 0.03);
 	const auto dt = _coverFrame ? std::min((frame - _coverFrame) / 1000., 0.1) : 1.;
 	_coverFrame = frame;
 	if (_coverRect.isEmpty() || _coverMode < 0) {
 		_coverRect = target;
 	} else {
-		const auto k = std::min(1., dt * 3.);
+		const auto k = std::min(1., dt * 2.2);
 		_coverRect = QRectF(
 			_coverRect.topLeft() + (target.topLeft() - _coverRect.topLeft()) * k,
 			_coverRect.size() + (target.size() - _coverRect.size()) * k);
@@ -1192,10 +1393,9 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 	const auto mixer = ::Media::Player::mixer();
 	const auto level = (_playing && mixer) ? mixer->songLevel() : 0.;
 	_coverBeat = std::max(level, _coverBeat - dt * 2.5);
-	const auto t = frame / 1000.;
-	const auto angle = std::sin(t * 0.8) * 5.;
-	const auto bob = std::sin(t * 1.1) * _coverRect.height() * 0.025;
-	const auto zoom = 1. + 0.05 * _coverBeat;
+	const auto angle = std::sin(t * 0.8) * 5. + std::sin(t * 0.37) * 3.;
+	const auto bob = std::sin(t * 1.1) * _coverRect.height() * 0.035;
+	const auto zoom = 1. + 0.04 * _coverBeat + 0.09 * _beat;
 	const auto accent = PaletteAt(
 		std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
 		0.).first;
@@ -1218,6 +1418,27 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 		p.setBrush(glow);
 		const auto grow = half * 0.05 * i;
 		p.drawRoundedRect(box.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow);
+	}
+	// A ring of bars that jump with the music.
+	{
+		constexpr auto kBars = 48;
+		constexpr auto kPi = 3.14159265358979323846;
+		const auto inner = half * 1.48;
+		const auto longest = half * 0.42;
+		auto bar = accent.lighter(130);
+		p.setBrush(Qt::NoBrush);
+		for (auto i = 0; i != kBars; ++i) {
+			const auto a = i * 2. * kPi / kBars;
+			const auto wobble = 0.5 + 0.5 * std::sin(t * (5. + (i % 7)) + i * 1.9);
+			const auto value = std::clamp(
+				0.08 + level * (0.35 + 0.65 * wobble) + _beat * 0.45 * wobble,
+				0.,
+				1.);
+			bar.setAlpha(int(110 + 120 * value));
+			p.setPen(QPen(bar, std::max(half * 0.035, 2.), Qt::SolidLine, Qt::RoundCap));
+			const auto dir = QPointF(std::cos(a), std::sin(a));
+			p.drawLine(dir * inner, dir * (inner + longest * value));
+		}
 	}
 	auto clip = QPainterPath();
 	clip.addRoundedRect(box, radius, radius);
@@ -1247,6 +1468,43 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 	p.setPen(QPen(QColor(255, 255, 255, 60), 1.5));
 	p.setBrush(Qt::NoBrush);
 	p.drawRoundedRect(box, radius, radius);
+	p.restore();
+}
+
+void LyricsWidget::paintBars(QPainter &p, QRectF area, crl::time now) {
+	// A strip of equalizer bars under the text.
+	constexpr auto kBars = 32;
+	const auto mixer = ::Media::Player::mixer();
+	const auto level = (_playing && mixer) ? mixer->songLevel() : 0.;
+	const auto t = crl::now() / 1000.;
+	const auto accent = PaletteAt(
+		std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
+		0.).first;
+	const auto full = std::min(area.width() * 0.8, 520. * style::Scale() / 100.);
+	const auto step = full / kBars;
+	const auto tallest = std::max(area.height() * 0.08, 18.);
+	const auto bottom = area.bottom() - tallest * 0.2;
+	const auto left = area.center().x() - full / 2.;
+	p.save();
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setPen(Qt::NoPen);
+	for (auto i = 0; i != kBars; ++i) {
+		const auto mirror = std::abs(i - (kBars - 1) / 2.) / (kBars / 2.);
+		const auto wobble = 0.5 + 0.5 * std::sin(t * (6. + (i % 5)) + i * 2.3);
+		const auto value = std::clamp(
+			(0.06 + level * (0.4 + 0.6 * wobble) + _beat * 0.5 * wobble)
+				* (1.1 - 0.6 * mirror),
+			0.04,
+			1.);
+		auto color = accent.lighter(140);
+		color.setAlpha(int(70 + 130 * value));
+		p.setBrush(color);
+		const auto h = tallest * value;
+		p.drawRoundedRect(
+			QRectF(left + i * step + step * 0.2, bottom - h, step * 0.6, h),
+			step * 0.3,
+			step * 0.3);
+	}
 	p.restore();
 }
 
@@ -1387,6 +1645,25 @@ QString VanishName(int index) {
 	case 2: return QString::fromUtf8("Улетает вверх");
 	}
 	return QString::fromUtf8("Искры");
+}
+
+QString AppearName(int index) {
+	switch (index) {
+	case 1: return QString::fromUtf8("Из центра");
+	case 2: return QString::fromUtf8("С краёв");
+	case 3: return QString::fromUtf8("Снизу");
+	case 4: return QString::fromUtf8("Из обложки");
+	}
+	return QString::fromUtf8("Вразброс");
+}
+
+QString DriftName(int index) {
+	switch (index) {
+	case 1: return QString::fromUtf8("Волна");
+	case 2: return QString::fromUtf8("Спираль");
+	case 3: return QString::fromUtf8("Дрожь в бит");
+	}
+	return QString::fromUtf8("Плавание");
 }
 
 QString StyleName(int index) {
@@ -1621,6 +1898,34 @@ void ShowSearchBox(not_null<Window::SessionController*> controller) {
 		const auto alive = std::make_shared<bool>(true);
 		box->lifetime().add([=] { *alive = false; });
 
+		// Other sources: Lyricsify has no API, so it opens in the browser;
+		// a downloaded .lrc file is loaded from the disk.
+		const auto lyricsify = box->addRow(
+			object_ptr<Ui::LinkButton>(
+				box,
+				QString::fromUtf8("Открыть Lyricsify в браузере")),
+			style::margins(
+				st::boxRowPadding.left(),
+				style::ConvertScale(10),
+				st::boxRowPadding.right(),
+				style::ConvertScale(4)));
+		lyricsify->setClickedCallback([=] {
+			auto url = QUrl(u"https://www.lyricsify.com/search"_q);
+			auto query = QUrlQuery();
+			query.addQueryItem(u"q"_q, field->getLastText().trimmed());
+			url.setQuery(query);
+			UrlClickHandler::Open(url.toString());
+		});
+		const auto importLrc = box->addRow(
+			object_ptr<Ui::LinkButton>(
+				box,
+				QString::fromUtf8("Загрузить скачанный .lrc файл…")),
+			style::margins(
+				st::boxRowPadding.left(),
+				style::ConvertScale(4),
+				st::boxRowPadding.right(),
+				style::ConvertScale(8)));
+
 		const auto apply = [=](QString lrc, double found) {
 			const auto duration = track.duration / 1000.;
 			if (duration > 0. && found > 0. && std::abs(found - duration) > 3.) {
@@ -1637,6 +1942,29 @@ void ShowSearchBox(not_null<Window::SessionController*> controller) {
 			}
 			box->closeBox();
 		};
+		importLrc->setClickedCallback([=] {
+			FileDialog::GetOpenPath(
+				box.get(),
+				QString::fromUtf8("Файл текста песни"),
+				u"Lyrics (*.lrc *.txt);;All files (*.*)"_q,
+				crl::guard(box, [=](const FileDialog::OpenResult &result) {
+					auto bytes = result.remoteContent;
+					if (bytes.isEmpty() && !result.paths.isEmpty()) {
+						auto file = QFile(result.paths.front());
+						if (file.open(QIODevice::ReadOnly)) {
+							bytes = file.readAll();
+						}
+					}
+					const auto text = QString::fromUtf8(bytes);
+					if (ParseLrc(text).empty()) {
+						status->setText(QString::fromUtf8(
+							"В файле нет строк с временем вида [01:23.45]. "
+							"Нужен именно .lrc с таймингами."));
+						return;
+					}
+					apply(text, 0.);
+				}));
+		});
 		const auto search = [=] {
 			const auto text = field->getLastText().trimmed();
 			if (text.isEmpty()) {

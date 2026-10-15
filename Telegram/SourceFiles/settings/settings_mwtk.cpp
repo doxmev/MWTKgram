@@ -29,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_music.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_room.h"
+#include "mwtk/mwtk_updater.h"
 #include "base/timer.h"
 #include "settings/settings_common.h"
 #include "settings.h"
@@ -850,6 +851,23 @@ void MwtkSettings::setupContent() {
 		::Mwtk::Lyrics::StyleName(2),
 	});
 	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Появление")));
+	AddSegmented(content, ::Mwtk::kOptionLyricsAppear, {
+		::Mwtk::Lyrics::AppearName(0),
+		::Mwtk::Lyrics::AppearName(1),
+		::Mwtk::Lyrics::AppearName(2),
+		::Mwtk::Lyrics::AppearName(3),
+		::Mwtk::Lyrics::AppearName(4),
+	});
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Движение")));
+	AddSegmented(content, ::Mwtk::kOptionLyricsDrift, {
+		::Mwtk::Lyrics::DriftName(0),
+		::Mwtk::Lyrics::DriftName(1),
+		::Mwtk::Lyrics::DriftName(2),
+		::Mwtk::Lyrics::DriftName(3),
+	});
+	Ui::AddSkip(content);
 	AddSlider(content, Utf("Движение слов"), ::Mwtk::kOptionLyricsMotion, 0, 100, Utf("%"));
 	AddSlider(content, Utf("Размер текста"), ::Mwtk::kOptionLyricsSize, 60, 140, Utf("%"));
 	Ui::AddSkip(content);
@@ -913,8 +931,24 @@ void MwtkSettings::setupContent() {
 	Ui::AddSkip(content);
 
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Полезные функции")));
+	AddActionButton(
+		content,
+		Utf("Проверить обновления (сборка ")
+			+ QString::number(::Mwtk::Updater::CurrentBuild())
+			+ ')',
+		[=] { ::Mwtk::Updater::CheckNow(); });
 	AddActionButton(content, Utf("Летающие чаты (F8)"), [=] {
 		::Mwtk::Floating::Toggle(window);
+	});
+	AddSlider(content, Utf("Сколько чатов летает"), ::Mwtk::kOptionFloatCount, 5, 40, QString());
+	Ui::AddSkip(content);
+	AddSegmented(content, ::Mwtk::kOptionFloatSource, {
+		Utf("Последние"),
+		Utf("Закреплённые"),
+		Utf("Выбрать вручную"),
+	});
+	AddActionButton(content, Utf("Выбрать летающие чаты…"), [=] {
+		::Mwtk::Floating::ShowPickBox(window);
 	});
 	AddActionButton(content, Utf("Скрытые чаты (Ctrl+Shift+L)"), [=] {
 		::Mwtk::Hidden::Open(window);

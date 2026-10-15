@@ -41,6 +41,8 @@ inline constexpr auto kStyleCount = 3;
 [[nodiscard]] QString LayoutName(int index);
 [[nodiscard]] QString VanishName(int index);
 [[nodiscard]] QString StyleName(int index);
+[[nodiscard]] QString AppearName(int index);
+[[nodiscard]] QString DriftName(int index);
 
 // Creates the flying lyrics layer over the main window body.
 void Setup(not_null<Ui::RpWidget*> body);

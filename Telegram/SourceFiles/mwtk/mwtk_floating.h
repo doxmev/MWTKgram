@@ -19,6 +19,9 @@ namespace Mwtk::Floating {
 // Shows or hides the floating chats over the window (F8).
 void Toggle(not_null<Window::SessionController*> controller);
 
+// Lets the user tick the chats that fly (source «Выбрать вручную»).
+void ShowPickBox(not_null<Window::SessionController*> controller);
+
 // Installs the F8 hotkey.
 void Setup();
 
