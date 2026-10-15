@@ -129,6 +129,7 @@ edit("TMessagesProj/src/main/java/org/telegram/ui/MainTabsActivity.java", replac
     "        checkUi_callTabVisible(getUserConfig().showCallsTab, false);\n"
     "        {\n"
     "            GlassTabView mwtkPlaylists = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.MUSIC, R.string.MwtkPlaylistsTab);\n"
+    "            mwtkPlaylists.setText(\"Плейлисты\");\n"
     "            mwtkPlaylists.setOnClickListener(v -> presentFragment(new org.telegram.mwtk.MwtkMusicActivity()));\n"
     "            tabsView.addView(mwtkPlaylists);\n"
     "            tabsView.setViewVisible(mwtkPlaylists, true, false);\n"
