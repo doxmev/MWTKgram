@@ -31,6 +31,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Mwtk::Holo {
 namespace {
 
+bool GlobalCapturing = false;
+
 class Layer final : public Ui::RpWidget {
 public:
 	Layer(QWidget *parent, not_null<QWidget*> target);
@@ -202,6 +204,7 @@ private:
 	QColor _linesColor;
 
 	// Rotation in degrees; the card rests slightly turned.
+	static constexpr auto kPlane = 8.;
 	static constexpr auto kRestX = -3.;
 	static constexpr auto kRestY = 5.;
 	double _rx = kRestX;
@@ -397,6 +400,9 @@ void WindowLayer::captureBehind() {
 	}
 	const auto origin = _section->mapTo(top, QPoint());
 	auto q = QPainter(&_behind);
+	// The chats skip painting while a layer covers them: not now.
+	GlobalCapturing = true;
+	const auto guard = gsl::finally([] { GlobalCapturing = false; });
 	for (auto i = levels.rbegin(); i != levels.rend(); ++i) {
 		for (const auto widget : *i) {
 			const auto at = widget->mapTo(top, QPoint()) - origin;
@@ -413,8 +419,8 @@ void WindowLayer::captureBehind() {
 	q.end();
 	// Softly out of focus, like seen through glass.
 	const auto small = _behind.scaled(
-		std::max(_behind.width() / 4, 1),
-		std::max(_behind.height() / 4, 1),
+		std::max(_behind.width() / 2, 1),
+		std::max(_behind.height() / 2, 1),
 		Qt::IgnoreAspectRatio,
 		Qt::SmoothTransformation);
 	_behind = small.scaled(
@@ -486,51 +492,45 @@ void WindowLayer::capture() {
 		result.setDevicePixelRatio(ratio);
 		return result;
 	};
+	// One glass plane with the userpic floating a little above it.
+	const auto ring = int(8 * style::Scale() / 100.);
 	const auto avatar = _userpic
 		? QRect(_userpic->mapTo(_section, QPoint()), _userpic->size())
+			.marginsAdded({ ring, ring, ring, ring })
+			.intersected(head)
 		: QRect();
-	const auto name = avatar.isEmpty()
-		? QRect()
-		: QRect(
-			head.x() + head.width() / 5,
-			avatar.y() + avatar.height(),
-			head.width() * 3 / 5,
-			std::max(head.y() + head.height() - avatar.y() - avatar.height(), 0));
-	auto headImage = cut(head);
+	auto plane = cut(rect());
+	auto avatarImage = QImage();
 	if (!avatar.isEmpty()) {
-		auto q = QPainter(&headImage);
-		q.setCompositionMode(QPainter::CompositionMode_DestinationOut);
-		q.setRenderHint(QPainter::Antialiasing);
-		q.setBrush(Qt::black);
-		q.setPen(Qt::NoPen);
-		q.drawEllipse(QRectF(avatar.translated(-head.topLeft())).adjusted(-1, -1, 1, 1));
-		q.fillRect(name.translated(-head.topLeft()), Qt::black);
-	}
-	const auto below = QRect(
-		0,
-		head.y() + head.height(),
-		width(),
-		std::max(height() - head.y() - head.height(), 0));
-	if (!below.isEmpty()) {
-		_parts.push_back({ cut(below), QRectF(below), 26. });
-	}
-	_parts.push_back({ std::move(headImage), QRectF(head), 18. });
-	if (!name.isEmpty()) {
-		_parts.push_back({ cut(name), QRectF(name), 50. });
-	}
-	if (!avatar.isEmpty()) {
-		auto image = cut(avatar);
-		auto round = QImage(image.size(), QImage::Format_ARGB32_Premultiplied);
-		round.setDevicePixelRatio(ratio);
-		round.fill(Qt::transparent);
-		auto q = QPainter(&round);
-		q.setRenderHint(QPainter::Antialiasing);
+		avatarImage = QImage(
+			avatar.size() * ratio,
+			QImage::Format_ARGB32_Premultiplied);
+		avatarImage.setDevicePixelRatio(ratio);
+		avatarImage.fill(Qt::transparent);
 		auto circle = QPainterPath();
 		circle.addEllipse(QRectF(QPointF(), QSizeF(avatar.size())));
-		q.setClipPath(circle);
-		q.drawImage(QPointF(), image);
-		q.end();
-		_parts.push_back({ std::move(round), QRectF(avatar), 85. });
+		{
+			auto q = QPainter(&avatarImage);
+			q.setRenderHint(QPainter::Antialiasing);
+			q.setClipPath(circle);
+			q.drawImage(QPointF(), cut(avatar));
+		}
+		// Where the userpic was, the head color: no hole in the card.
+		const auto sampleAt = QPoint(
+			std::max(avatar.x() - ring * 2, head.x() + 1),
+			avatar.y() + avatar.height() / 2) * ratio;
+		const auto fillColor = QColor::fromRgba(
+			plane.pixel(sampleAt.x(), sampleAt.y()));
+		auto q = QPainter(&plane);
+		q.setRenderHint(QPainter::Antialiasing);
+		q.setCompositionMode(QPainter::CompositionMode_Source);
+		q.setPen(Qt::NoPen);
+		q.setBrush(fillColor);
+		q.drawEllipse(QRectF(avatar).adjusted(-1, -1, 1, 1));
+	}
+	_parts.push_back({ std::move(plane), QRectF(rect()), kPlane });
+	if (!avatarImage.isNull()) {
+		_parts.push_back({ std::move(avatarImage), QRectF(avatar), kPlane + 28. });
 	}
 	_cacheValid = false;
 }
@@ -580,7 +580,7 @@ void WindowLayer::paintCard(QPainter &p) {
 	p.setRenderHint(QPainter::SmoothPixmapTransform);
 
 	// The glass body: a faint tint of the theme color.
-	const auto body = quad(QRectF(rect()), 0.);
+	const auto body = quad(QRectF(rect()), kPlane);
 	auto glass = accent;
 	glass.setAlpha(26);
 	p.setPen(Qt::NoPen);
@@ -634,7 +634,7 @@ void WindowLayer::paintEvent(QPaintEvent *e) {
 	p.drawImage(QPointF(), _cached);
 	p.setOpacity(1.);
 
-	const auto body = quad(full, 0.);
+	const auto body = quad(full, kPlane);
 	auto path = QPainterPath();
 	path.addPolygon(body);
 	path.closeSubpath();
@@ -652,7 +652,7 @@ void WindowLayer::paintEvent(QPaintEvent *e) {
 		auto transform = QTransform();
 		if (QTransform::quadToQuad(
 				Corners(slice),
-				quad(slice.translated(dx, 0.), 30.),
+				quad(slice.translated(dx, 0.), kPlane),
 				transform)) {
 			p.save();
 			p.setTransform(transform, true);
@@ -720,6 +720,10 @@ void WindowLayer::paintEvent(QPaintEvent *e) {
 }
 
 } // namespace
+
+bool Capturing() {
+	return GlobalCapturing;
+}
 
 void AttachWindow(not_null<QWidget*> inside, QWidget *userpic) {
 	auto section = inside->parentWidget();

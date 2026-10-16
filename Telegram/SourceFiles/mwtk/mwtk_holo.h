@@ -17,4 +17,8 @@ void Attach(not_null<QWidget*> userpic);
 // (it stays dense), `userpic` floats above the card; it may be null.
 void AttachWindow(not_null<QWidget*> head, QWidget *userpic = nullptr);
 
+// True while the hologram draws what is behind the profile: the content
+// under a layer paints anyway (it usually skips covered parts).
+[[nodiscard]] bool Capturing();
+
 } // namespace Mwtk::Holo

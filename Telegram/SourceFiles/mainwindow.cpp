@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mainwindow.h"
 
+#include "mwtk/mwtk_holo.h"
+
 #include "mwtk/mwtk_overlay.h"
 
 #include "data/data_document.h"
@@ -618,6 +620,9 @@ void MainWindow::checkActivation() {
 }
 
 bool MainWindow::contentOverlapped(const QRect &globalRect) {
+	if (Mwtk::Holo::Capturing()) {
+		return false;
+	}
 	return (_main && _main->contentOverlapped(globalRect))
 		|| (_layer && _layer->contentOverlapped(globalRect));
 }

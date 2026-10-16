@@ -524,9 +524,6 @@ TopBar::TopBar(
 	setupButtons(controller, descriptor.source);
 	setupSwipeBack(controller);
 	setupUserpicButton(controller);
-	if (_userpicButton) {
-		Mwtk::Holo::Attach(_userpicButton.get());
-	}
 	// The section is built around the top bar: attach once it is in place.
 	crl::on_main(this, [=] {
 		Mwtk::Holo::AttachWindow(this, _userpicButton.get());
