@@ -30,6 +30,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/player/media_player_instance.h"
 #include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_playlists.h"
+#include "mwtk/mwtk_taste.h"
 #include "storage/storage_shared_media.h"
 #include "ui/image/image.h"
 #include "ui/layers/generic_box.h"
@@ -293,12 +294,38 @@ public:
 		return _action;
 	}
 
+	// Takes no space in the list any more (a disliked song).
+	void collapse() {
+		_collapsed = true;
+		hide();
+		resizeToWidth(width());
+	}
+
+	// A second button left of the main one («👎» in «Мой микс»).
+	Ui::LinkButton *addExtraAction(const QString &text) {
+		_extra = Ui::CreateChild<Ui::LinkButton>(this, text);
+		_extra->show();
+		resizeToWidth(width());
+		return _extra;
+	}
+
 protected:
 	int resizeGetHeight(int newWidth) override {
+		if (_collapsed) {
+			return 0;
+		}
+		auto skip = Px(14);
 		if (_action) {
 			_action->moveToRight(
-				Px(14),
+				skip,
 				(Px(58) - _action->height()) / 2,
+				newWidth);
+			skip += _action->width() + Px(14);
+		}
+		if (_extra) {
+			_extra->moveToRight(
+				skip,
+				(Px(58) - _extra->height()) / 2,
 				newWidth);
 		}
 		return Px(58);
@@ -349,6 +376,9 @@ protected:
 		auto right = width() - Px(12);
 		if (_action) {
 			right -= _action->width() + Px(12);
+		}
+		if (_extra) {
+			right -= _extra->width() + Px(14);
 		}
 		const auto duration = Playlists::FormatDuration(_duration);
 		p.setFont(st::normalFont);
@@ -403,6 +433,8 @@ private:
 	const QString _performer;
 	const int _duration = 0;
 	Ui::LinkButton *_action = nullptr;
+	Ui::LinkButton *_extra = nullptr;
+	bool _collapsed = false;
 	bool _wasPlaying = false;
 	bool _lyrics = false;
 	bool _lyricsChecked = false;
@@ -916,26 +948,33 @@ void GetJson(const QString &url, Fn<void(QJsonObject)> callback) {
 	});
 }
 
-// Similar artists from the open Deezer catalog (no key needed): for the
-// artists you listen to, their related artists and those artists' top
-// songs. Gives "artist title" queries, empty when nothing was found.
-void FindSimilarSongs(
+struct MixCandidate {
+	QString artist;
+	QString title;
+	bool familiar = false;
+};
+
+// Candidates from the open Deezer catalog (no key needed), like a VK or
+// Spotify mix: mostly songs of artists related to the ones you listen to,
+// plus a few songs of your own artists. Disliked songs, banned artists and
+// songs played in the last days are left out.
+void FindMixCandidates(
 		std::vector<QString> seeds,
-		Fn<void(std::vector<QString>)> done) {
-	struct Similar {
+		Fn<void(std::vector<MixCandidate>)> done) {
+	struct Collect {
 		std::vector<QString> used;
-		std::vector<QString> queries;
+		std::vector<MixCandidate> result;
 		int pending = 0;
-		Fn<void(std::vector<QString>)> done;
+		Fn<void(std::vector<MixCandidate>)> done;
 	};
-	const auto state = std::make_shared<Similar>();
+	const auto state = std::make_shared<Collect>();
 	state->done = std::move(done);
 	for (const auto &seed : seeds) {
 		state->used.push_back(seed.toLower());
 	}
 	const auto finishOne = [=] {
 		if (--state->pending == 0) {
-			auto result = std::move(state->queries);
+			auto result = std::move(state->result);
 			auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
 			std::shuffle(result.begin(), result.end(), random);
 			state->done(std::move(result));
@@ -944,22 +983,68 @@ void FindSimilarSongs(
 	const auto encode = [](const QString &text) {
 		return QString::fromLatin1(QUrl::toPercentEncoding(text));
 	};
-	const auto count = std::min(int(seeds.size()), 4);
+	// Top songs of an artist: `take` random ones that pass the filters.
+	const auto addTop = [=](qint64 id, QString name, int take, bool familiar) {
+		++state->pending;
+		GetJson(
+			u"https://api.deezer.com/artist/%1/top?limit=15"_q.arg(id),
+			[=](QJsonObject top) {
+			auto songs = top.value(u"data"_q).toArray();
+			auto order = std::vector<int>();
+			for (auto k = 0; k != songs.size(); ++k) {
+				order.push_back(k);
+			}
+			auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
+			std::shuffle(order.begin(), order.end(), random);
+			auto taken = 0;
+			for (const auto k : order) {
+				if (taken >= take) {
+					break;
+				}
+				const auto title = songs.at(k).toObject().value(
+					u"title"_q).toString();
+				if (title.isEmpty()
+					|| Taste::IsDisliked(name, title)
+					|| Taste::PlayedRecently(name, title, 3)) {
+					continue;
+				}
+				const auto duplicate = ranges::any_of(
+					state->result,
+					[&](const MixCandidate &c) {
+						return !c.title.compare(title, Qt::CaseInsensitive)
+							&& !c.artist.compare(name, Qt::CaseInsensitive);
+					});
+				if (duplicate) {
+					continue;
+				}
+				state->result.push_back({ name, title, familiar });
+				++taken;
+			}
+			finishOne();
+		});
+	};
+	const auto count = int(seeds.size());
 	state->pending = count;
 	for (auto i = 0; i != count; ++i) {
+		const auto seed = seeds[i];
 		GetJson(
-			u"https://api.deezer.com/search/artist?limit=1&q="_q + encode(seeds[i]),
+			u"https://api.deezer.com/search/artist?limit=1&q="_q + encode(seed),
 			[=](QJsonObject found) {
 			const auto data = found.value(u"data"_q).toArray();
 			if (data.isEmpty()) {
 				finishOne();
 				return;
 			}
-			const auto id = QString::number(
-				qint64(data.at(0).toObject().value(u"id"_q).toDouble()));
+			const auto id = qint64(
+				data.at(0).toObject().value(u"id"_q).toDouble());
+			// Every second seed also gives one song of its own: the mix
+			// stays recognisable, like VK mixes do.
+			if (i % 2 == 0) {
+				addTop(id, seed, 1, true);
+			}
 			++state->pending;
 			GetJson(
-				u"https://api.deezer.com/artist/"_q + id + u"/related?limit=12"_q,
+				u"https://api.deezer.com/artist/%1/related?limit=20"_q.arg(id),
 				[=](QJsonObject related) {
 				auto artists = related.value(u"data"_q).toArray();
 				auto order = std::vector<int>();
@@ -976,35 +1061,17 @@ void FindSimilarSongs(
 					const auto artist = artists.at(k).toObject();
 					const auto name = artist.value(u"name"_q).toString();
 					if (name.isEmpty()
+						|| Taste::ArtistBanned(name)
 						|| ranges::contains(state->used, name.toLower())) {
 						continue;
 					}
 					state->used.push_back(name.toLower());
 					++taken;
-					++state->pending;
-					GetJson(
-						u"https://api.deezer.com/artist/"_q
-							+ QString::number(qint64(
-								artist.value(u"id"_q).toDouble()))
-							+ u"/top?limit=8"_q,
-						[=](QJsonObject top) {
-						const auto songs = top.value(u"data"_q).toArray();
-						if (!songs.isEmpty()) {
-							auto random = std::mt19937(
-								uint32(base::RandomValue<uint32>()));
-							for (auto n = 0; n != 2; ++n) {
-								const auto title = songs.at(int(random()
-									% uint32(songs.size()))).toObject().value(
-										u"title"_q).toString();
-								const auto query = name + ' ' + title;
-								if (!title.isEmpty()
-									&& !ranges::contains(state->queries, query)) {
-									state->queries.push_back(query);
-								}
-							}
-						}
-						finishOne();
-					});
+					addTop(
+						qint64(artist.value(u"id"_q).toDouble()),
+						name,
+						2,
+						false);
 				}
 				finishOne();
 			});
@@ -1016,49 +1083,41 @@ void FindSimilarSongs(
 	}
 }
 
-// «Мой микс» like in VK: songs of artists similar to the ones you listen
-// to (your playlists and the song playing now), not the same artists
-// again. Falls back to your own artists when Deezer is not reachable.
+// «Мой микс»: built from everything you listen to (history with skips,
+// playlists, the song playing now), not only the current song.
 void BuildMix(
 		not_null<Main::Session*> session,
 		Fn<void(std::vector<FullMsgId>, bool)> done) {
-	auto artists = std::vector<QString>();
-	const auto add = [&](const QString &name) {
-		const auto clean = name.trimmed();
-		if (clean.isEmpty()) {
-			return;
-		}
-		for (const auto &existing : artists) {
-			if (!existing.compare(clean, Qt::CaseInsensitive)) {
-				return;
-			}
-		}
-		artists.push_back(clean);
-	};
+	auto extra = std::vector<QString>();
 	const auto current = ::Media::Player::instance()->current(
 		AudioMsgId::Type::Song);
 	if (const auto document = current.audio()) {
 		if (const auto song = document->song()) {
-			add(song->performer);
+			extra.push_back(song->performer);
 		}
 	}
 	for (const auto &playlist : Playlists::List(session)) {
 		for (const auto &track : playlist.tracks) {
-			add(track.performer);
+			extra.push_back(track.performer);
 		}
 	}
-	if (artists.empty()) {
+	const auto seeds = Taste::SeedArtists(5, extra);
+	if (seeds.empty()) {
 		done({}, false);
 		return;
 	}
-	auto random = std::mt19937(uint32(base::RandomValue<uint32>()));
-	std::shuffle(artists.begin(), artists.end(), random);
-	FindSimilarSongs(artists, crl::guard(session, [=](
-			std::vector<QString> similar) {
-		const auto exact = !similar.empty();
-		auto queries = exact ? std::move(similar) : artists;
-		if (queries.size() > size_t(exact ? 18 : 6)) {
-			queries.resize(exact ? 18 : 6);
+	FindMixCandidates(seeds, crl::guard(session, [=](
+			std::vector<MixCandidate> candidates) {
+		auto queries = std::vector<QString>();
+		for (const auto &candidate : candidates) {
+			queries.push_back(candidate.artist + ' ' + candidate.title);
+		}
+		const auto exact = !queries.empty();
+		if (!exact) {
+			queries = seeds; // Deezer is not reachable: your own artists.
+		}
+		if (queries.size() > size_t(exact ? 22 : 6)) {
+			queries.resize(exact ? 22 : 6);
 		}
 		struct Collected {
 			std::vector<FullMsgId> ids;
@@ -1066,18 +1125,46 @@ void BuildMix(
 		};
 		const auto collected = std::make_shared<Collected>();
 		collected->waiting = int(queries.size());
+		const auto accept = [=](FullMsgId id) {
+			const auto document = SongOf(session->data().message(id));
+			const auto song = document ? document->song() : nullptr;
+			if (!song
+				|| Taste::IsDisliked(song->performer, song->title)
+				|| Taste::ArtistBanned(song->performer)) {
+				return false;
+			}
+			for (const auto &other : collected->ids) {
+				const auto was = SongOf(session->data().message(other));
+				const auto wasSong = was ? was->song() : nullptr;
+				if (wasSong
+					&& !wasSong->title.compare(song->title, Qt::CaseInsensitive)
+					&& !wasSong->performer.compare(
+						song->performer,
+						Qt::CaseInsensitive)) {
+					return false;
+				}
+			}
+			return true;
+		};
 		for (const auto &query : queries) {
 			SearchBot(session, query, [=](std::vector<FullMsgId> ids) {
 				if (exact) {
-					if (!ids.empty()) {
-						collected->ids.push_back(ids.front()); // best match
+					for (const auto &id : ids) {
+						if (accept(id)) {
+							collected->ids.push_back(id); // best match
+							break;
+						}
 					}
 				} else {
 					auto random = std::mt19937(
 						uint32(base::RandomValue<uint32>()));
 					std::shuffle(ids.begin(), ids.end(), random);
-					for (auto i = 0; i != std::min(int(ids.size()), 4); ++i) {
-						collected->ids.push_back(ids[i]);
+					auto taken = 0;
+					for (const auto &id : ids) {
+						if (taken < 4 && accept(id)) {
+							collected->ids.push_back(id);
+							++taken;
+						}
 					}
 				}
 				if (--collected->waiting == 0) {
@@ -1280,7 +1367,9 @@ void Show(not_null<Window::SessionController*> controller) {
 		};
 
 		// Rows of found songs: a click plays the list from that song on.
-		const auto addFoundRows = [=](std::vector<FullMsgId> ids) {
+		const auto addFoundRows = [=](
+				std::vector<FullMsgId> ids,
+				bool withDislike) {
 			auto added = 0;
 			for (auto i = 0; i != int(ids.size()); ++i) {
 				const auto id = ids[i];
@@ -1311,6 +1400,20 @@ void Show(not_null<Window::SessionController*> controller) {
 				row->action()->setClickedCallback([=] {
 					SaveAndAddToPlaylist(controller, id);
 				});
+				if (withDislike) {
+					const auto dislike = row->addExtraAction(Utf("👎"));
+					dislike->setClickedCallback([=] {
+						Taste::Dislike(performer, songTitle);
+						if (IsPlaying(id)) {
+							::Media::Player::instance()->next(
+								AudioMsgId::Type::Song);
+						}
+						crl::on_main(row, [=] { row->collapse(); });
+						controller->showToast(Utf(
+							"Больше не будет в миксе. Два «👎» одному исполнителю — "
+							"и он тоже пропадёт."));
+					});
+				}
 				++added;
 			}
 			return added;
@@ -1365,7 +1468,7 @@ void Show(not_null<Window::SessionController*> controller) {
 						if (!ids.empty()) {
 							addStatus(Utf("ИЗ ТВОИХ ЧАТОВ"));
 						}
-						*found += addFoundRows(std::move(ids));
+						*found += addFoundRows(std::move(ids), false);
 						status->setText(*found
 							? Utf("Нажми на песню — заиграет список с неё, «+ в плейлист» — сохранить.")
 							: Utf("Ничего не нашлось. Попробуй написать иначе."));
@@ -1376,7 +1479,7 @@ void Show(not_null<Window::SessionController*> controller) {
 				if (!alive()) {
 					return;
 				}
-				*found += addFoundRows(std::move(ids));
+				*found += addFoundRows(std::move(ids), false);
 				searchChats();
 			}));
 		};
@@ -1394,7 +1497,7 @@ void Show(not_null<Window::SessionController*> controller) {
 				if (nav->generation != generation || nav->kind != ViewKind::Mix) {
 					return;
 				}
-				if (!addFoundRows(ids)) {
+				if (!addFoundRows(ids, true)) {
 					status->setText(hadArtists
 						? Utf("Музыкальный поиск Telegram сейчас не ответил. Попробуй ещё раз.")
 						: Utf("Добавь песни в плейлисты или включи песню — микс подберётся по ним."));

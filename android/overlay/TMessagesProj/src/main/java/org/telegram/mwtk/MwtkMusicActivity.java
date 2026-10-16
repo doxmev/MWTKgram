@@ -213,6 +213,19 @@ public class MwtkMusicActivity extends BaseFragment {
                 row.bind(message, message.getMusicTitle(), message.getMusicAuthor(), (int) message.getDuration(), "＋");
                 row.setOnClickListener(v -> MwtkPlaylists.playMessages(results, message));
                 row.action.setOnClickListener(v -> MwtkMusicBot.saveAndAdd(this, message));
+                if ("Мой микс".equals(resultsTitle)) {
+                    row.showExtra("👎");
+                    row.extra.setOnClickListener(v -> {
+                        MwtkTaste.dislike(message.getMusicAuthor(), message.getMusicTitle());
+                        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+                        if (playing != null && playing.getId() == message.getId() && playing.getDialogId() == message.getDialogId()) {
+                            MediaController.getInstance().playNextMessage();
+                        }
+                        results.remove(message);
+                        content.removeView(row);
+                        MwtkUi.toast("Больше не будет в миксе. Два «👎» одному исполнителю — и он тоже пропадёт");
+                    });
+                }
                 content.addView(row);
             }
             return;
@@ -712,6 +725,7 @@ public class MwtkMusicActivity extends BaseFragment {
         final TextView subtitle;
         final TextView time;
         final TextView action;
+        final TextView extra;
         private String seed;
 
         TrackRow(Context context) {
@@ -745,6 +759,21 @@ public class MwtkMusicActivity extends BaseFragment {
             action.setTextSize(20);
             action.setGravity(Gravity.CENTER);
             addView(action, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 6, 0));
+            extra = new TextView(context);
+            extra.setTextColor(DIM);
+            extra.setTextSize(18);
+            extra.setGravity(Gravity.CENTER);
+            extra.setVisibility(GONE);
+            addView(extra, LayoutHelper.createFrame(40, 40, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 46, 0));
+        }
+
+        /** A second button left of «＋» («👎» in «Мой микс»). */
+        void showExtra(String text) {
+            extra.setText(text);
+            extra.setVisibility(VISIBLE);
+            time.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 90, 0));
+            View texts = getChildAt(1);
+            texts.setLayoutParams(LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 72, 0, 136, 0));
         }
 
         @Override

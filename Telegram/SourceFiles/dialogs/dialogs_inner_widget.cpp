@@ -1069,6 +1069,13 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 		.narrow = (fullWidth < st::columnMinimalWidthLeft / 2),
 		.insideCommunity = communityModeShown(),
 	};
+	if (Mwtk::ChatListTransparent()) {
+		// MWTK: the widget is opaque for Qt (no clearing before paint), and
+		// the 3D scene behind the see-through list has transparent parts.
+		// Without a solid base the old frame showed through while
+		// scrolling: doubled names and stripes.
+		p.fillRect(r, st::dialogsBg);
+	}
 	if (Mwtk::ChatListTransparent()
 		&& Mwtk::PaintRoomInWindow(p, this)) {
 		auto color = QBrush(context.currentBg).color();

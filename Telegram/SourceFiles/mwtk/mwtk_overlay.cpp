@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_appicon.h"
 #include "mwtk/mwtk_floating.h"
 #include "mwtk/mwtk_updater.h"
+#include "mwtk/mwtk_taste.h"
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_hotkeys.h"
 #include "mwtk/mwtk_lyrics.h"
@@ -1027,6 +1028,7 @@ void SetupOverlay(not_null<Ui::RpWidget*> body) {
 	Hidden::Setup();
 	Floating::Setup();
 	Updater::Setup();
+	Taste::Setup();
 	Core::App().domain().activeSessionValue(
 	) | rpl::map([](Main::Session *session) {
 		return session

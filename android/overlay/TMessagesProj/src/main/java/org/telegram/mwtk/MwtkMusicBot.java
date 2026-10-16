@@ -152,19 +152,19 @@ public final class MwtkMusicBot {
         MwtkUi.toast("Сохраняю песню в «Избранное»…");
     }
 
-    /** Artists you listen to: the song playing now and your playlists. */
-    private static ArrayList<String> seedArtists() {
+    /** Artists from your playlists and the song playing now (starting weight for the seeds). */
+    private static ArrayList<String> knownArtists() {
         ArrayList<String> artists = new ArrayList<>();
         MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
         if (playing != null && playing.isMusic()) {
-            addArtist(artists, playing.getMusicAuthor());
+            artists.add(playing.getMusicAuthor());
         }
         for (int i = 0; i < MwtkPlaylists.count(); i++) {
             JSONArray tracks = MwtkPlaylists.tracks(i);
             for (int k = 0; tracks != null && k < tracks.length(); k++) {
                 JSONObject track = tracks.optJSONObject(k);
                 if (track != null) {
-                    addArtist(artists, track.optString("performer", ""));
+                    artists.add(track.optString("performer", ""));
                 }
             }
         }
@@ -179,19 +179,51 @@ public final class MwtkMusicBot {
         }
     }
 
+    /** Up to {@code take} songs of a Deezer artist that pass your dislikes and recent plays. */
+    private static void addTop(long id, String name, int take, ArrayList<String> queries, java.util.Random random) {
+        try {
+            String top = MwtkLyrics.get("https://api.deezer.com/artist/" + id + "/top?limit=15");
+            JSONArray songs = top == null ? null : new JSONObject(top).optJSONArray("data");
+            if (songs == null) {
+                return;
+            }
+            ArrayList<Integer> order = new ArrayList<>();
+            for (int k = 0; k < songs.length(); k++) {
+                order.add(k);
+            }
+            Collections.shuffle(order, random);
+            int taken = 0;
+            for (int k : order) {
+                if (taken >= take) {
+                    break;
+                }
+                String title = songs.getJSONObject(k).optString("title", "");
+                if (title.isEmpty() || MwtkTaste.isDisliked(name, title) || MwtkTaste.playedRecently(name, title, 3)) {
+                    continue;
+                }
+                String query = name + " " + title;
+                if (!queries.contains(query)) {
+                    queries.add(query);
+                    taken++;
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+    }
+
     /**
-     * Similar artists from the open Deezer catalog (no key needed): for each
-     * artist you listen to, its related artists and their top songs.
-     * Returns "artist — title" queries, or an empty list on failure.
+     * Candidates like in a VK or Spotify mix, from the open Deezer catalog:
+     * mostly songs of artists related to the ones you listen to, plus a few
+     * songs of your own artists. Returns "artist title" queries.
      */
-    private static ArrayList<String> similarSongs(ArrayList<String> seeds) {
+    private static ArrayList<String> candidates(ArrayList<String> seeds) {
         ArrayList<String> queries = new ArrayList<>();
         ArrayList<String> used = new ArrayList<>();
         for (String seed : seeds) {
             used.add(seed.toLowerCase(Locale.ROOT));
         }
         java.util.Random random = new java.util.Random();
-        for (int s = 0; s < Math.min(4, seeds.size()); s++) {
+        for (int s = 0; s < seeds.size(); s++) {
             try {
                 String found = MwtkLyrics.get("https://api.deezer.com/search/artist?limit=1&q=" + encode(seeds.get(s)));
                 JSONArray data = found == null ? null : new JSONObject(found).optJSONArray("data");
@@ -199,58 +231,72 @@ public final class MwtkMusicBot {
                     continue;
                 }
                 long id = data.getJSONObject(0).optLong("id");
-                String related = MwtkLyrics.get("https://api.deezer.com/artist/" + id + "/related?limit=12");
+                if (s % 2 == 0) {
+                    addTop(id, seeds.get(s), 1, queries, random); // one familiar song
+                }
+                String related = MwtkLyrics.get("https://api.deezer.com/artist/" + id + "/related?limit=20");
                 JSONArray artists = related == null ? null : new JSONObject(related).optJSONArray("data");
                 if (artists == null) {
                     continue;
                 }
+                ArrayList<Integer> order = new ArrayList<>();
+                for (int k = 0; k < artists.length(); k++) {
+                    order.add(k);
+                }
+                Collections.shuffle(order, random);
                 int taken = 0;
-                for (int a = 0; a < artists.length() && taken < 3; a++) {
-                    JSONObject artist = artists.getJSONObject(random.nextInt(artists.length()));
+                for (int k : order) {
+                    if (taken >= 3) {
+                        break;
+                    }
+                    JSONObject artist = artists.getJSONObject(k);
                     String name = artist.optString("name", "");
-                    if (name.isEmpty() || used.contains(name.toLowerCase(Locale.ROOT))) {
+                    if (name.isEmpty() || MwtkTaste.artistBanned(name) || used.contains(name.toLowerCase(Locale.ROOT))) {
                         continue;
                     }
                     used.add(name.toLowerCase(Locale.ROOT));
-                    String top = MwtkLyrics.get("https://api.deezer.com/artist/" + artist.optLong("id") + "/top?limit=8");
-                    JSONArray songs = top == null ? null : new JSONObject(top).optJSONArray("data");
-                    if (songs == null || songs.length() == 0) {
-                        continue;
-                    }
-                    for (int k = 0; k < 2 && k < songs.length(); k++) {
-                        String title = songs.getJSONObject(random.nextInt(songs.length())).optString("title", "");
-                        String query = name + " " + title;
-                        if (!title.isEmpty() && !queries.contains(query)) {
-                            queries.add(query);
-                        }
-                    }
+                    addTop(artist.optLong("id"), name, 2, queries, random);
                     taken++;
                 }
             } catch (Throwable ignore) {
             }
         }
-        Collections.shuffle(queries);
+        Collections.shuffle(queries, random);
         return queries;
     }
 
+    private static boolean accept(MessageObject song, ArrayList<MessageObject> already) {
+        String performer = song.getMusicAuthor();
+        String title = song.getMusicTitle();
+        if (MwtkTaste.isDisliked(performer, title) || MwtkTaste.artistBanned(performer)) {
+            return false;
+        }
+        for (MessageObject other : already) {
+            if (String.valueOf(other.getMusicAuthor()).equalsIgnoreCase(String.valueOf(performer))
+                && String.valueOf(other.getMusicTitle()).equalsIgnoreCase(String.valueOf(title))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /**
-     * «Мой микс» like in VK: songs of artists similar to the ones you listen
-     * to, not the same artists again. Falls back to your own artists when
-     * the catalog of similar artists is not reachable.
+     * «Мой микс»: built from everything you listen to — history with skips,
+     * playlists and the song playing now — not only the current song.
+     * Falls back to your own artists when Deezer is not reachable.
      */
     public static void mix(int account, Mixed done) {
-        ArrayList<String> seeds = seedArtists();
+        ArrayList<String> seeds = MwtkTaste.seedArtists(5, knownArtists());
         if (seeds.isEmpty()) {
             done.run(new ArrayList<>(), false);
             return;
         }
-        Collections.shuffle(seeds);
         org.telegram.messenger.Utilities.globalQueue.postRunnable(() -> {
-            ArrayList<String> similar = similarSongs(seeds);
+            ArrayList<String> similar = candidates(seeds);
             AndroidUtilities.runOnUIThread(() -> {
                 boolean exact = !similar.isEmpty();
                 ArrayList<String> queries = exact ? similar : new ArrayList<>(seeds);
-                while (queries.size() > (exact ? 18 : 6)) {
+                while (queries.size() > (exact ? 22 : 6)) {
                     queries.remove(queries.size() - 1);
                 }
                 ArrayList<MessageObject> all = new ArrayList<>();
@@ -258,13 +304,20 @@ public final class MwtkMusicBot {
                 for (String query : queries) {
                     search(account, query, songs -> {
                         if (exact) {
-                            if (!songs.isEmpty()) {
-                                all.add(songs.get(0)); // the best match for "artist title"
+                            for (MessageObject song : songs) {
+                                if (accept(song, all)) {
+                                    all.add(song); // the best match for "artist title"
+                                    break;
+                                }
                             }
                         } else {
                             Collections.shuffle(songs);
-                            for (int i = 0; i < Math.min(4, songs.size()); i++) {
-                                all.add(songs.get(i));
+                            int taken = 0;
+                            for (MessageObject song : songs) {
+                                if (taken < 4 && accept(song, all)) {
+                                    all.add(song);
+                                    taken++;
+                                }
                             }
                         }
                         if (--waiting[0] == 0) {

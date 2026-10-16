@@ -679,6 +679,7 @@ public final class MwtkLyrics {
         }
 
         private void poll() {
+            MwtkTaste.tick();
             MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
             boolean music = playing != null && playing.isMusic();
             track(music && enabled() ? playing : null);
