@@ -171,6 +171,12 @@ struct State {
 	std::unique_ptr<QNetworkAccessManager> network;
 };
 
+// While the karaoke is open the flying text keeps quiet: one text at once.
+[[nodiscard]] rpl::variable<bool> &KaraokeShown() {
+	static auto result = rpl::variable<bool>(false);
+	return result;
+}
+
 [[nodiscard]] State &Current() {
 	static auto result = State();
 	return result;
@@ -639,7 +645,8 @@ LyricsWidget::LyricsWidget(QWidget *parent)
 		OptionChanges(kOptionHideChats),
 		OptionChanges(kOptionPalette),
 		ConfigChanges(),
-		Current().changes.events()
+		Current().changes.events(),
+		KaraokeShown().changes() | rpl::to_empty
 	) | rpl::on_next([=] {
 		refresh();
 	}, lifetime());
@@ -689,7 +696,9 @@ bool LyricsWidget::hideMode() const {
 }
 
 void LyricsWidget::refresh() {
-	_enabled = EffectsEnabled() && OptionValue(kOptionLyrics);
+	_enabled = EffectsEnabled()
+		&& OptionValue(kOptionLyrics)
+		&& !KaraokeShown().current();
 	_layouts.clear();
 	_layoutGeneration = -1;
 	const auto hide = hideMode();
@@ -2320,6 +2329,11 @@ public:
 		setFocusPolicy(Qt::StrongFocus);
 		setMouseTracking(true);
 		_timer.callEach(16);
+		KaraokeShown() = true;
+	}
+
+	~KaraokeWidget() {
+		KaraokeShown() = false;
 	}
 
 protected:
@@ -2586,15 +2600,19 @@ void ShowLyricsList(not_null<Window::SessionController*> controller) {
 void FillSongMenu(
 		not_null<Ui::PopupMenu*> menu,
 		not_null<Window::SessionController*> controller) {
-	if (!EffectsEnabled() || !OptionValue(kOptionLyrics)) {
+	if (!EffectsEnabled()) {
 		return;
 	}
-	menu->addAction(
-		(HideChatsEnabled()
-			? QString::fromUtf8("✓ Спрятать чаты (текст песни)")
-			: QString::fromUtf8("Спрятать чаты (текст песни)")),
-		[] { ToggleHideChats(); },
-		&st::menuIconShowAll);
+	// Only hiding the chats needs the flying text: the cover, the
+	// karaoke and the text tools work without it.
+	if (OptionValue(kOptionLyrics)) {
+		menu->addAction(
+			(HideChatsEnabled()
+				? QString::fromUtf8("✓ Спрятать чаты (текст песни)")
+				: QString::fromUtf8("Спрятать чаты (текст песни)")),
+			[] { ToggleHideChats(); },
+			&st::menuIconShowAll);
+	}
 	if (const auto document = Current().track.document) {
 		menu->addAction(
 			QString::fromUtf8("Своя обложка песни…"),

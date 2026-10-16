@@ -135,12 +135,16 @@ public final class MwtkChatMenu {
             items.add("В плейлист MWTK");
             options.add(OPTION_PLAYLIST);
             icons.add(R.drawable.msg_fave);
+            // Only hiding the chats needs the flying text: the text tools
+            // work without it.
             if (MwtkConfig.flag(MwtkConfig.LYRICS, true)) {
                 items.add(MwtkConfig.flag(MwtkConfig.HIDE_CHATS, false)
                     ? "✓ Спрятать чаты (текст песни)"
                     : "Спрятать чаты (текст песни)");
                 options.add(OPTION_HIDE_CHATS);
                 icons.add(R.drawable.msg_viewintopic);
+            }
+            {
                 items.add("Найти текст");
                 options.add(OPTION_FIND_LYRICS);
                 icons.add(R.drawable.msg_search);

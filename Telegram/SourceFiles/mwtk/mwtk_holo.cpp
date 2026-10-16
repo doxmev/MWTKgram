@@ -12,6 +12,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_options.h"
 #include "ui/rp_widget.h"
 #include "ui/style/style_core_scale.h"
+#include "styles/style_basic.h"
+
+#include <QtGui/QMouseEvent>
+#include <QtWidgets/QApplication>
 
 #include <QtCore/QPointer>
 #include <QtGui/QConicalGradient>
@@ -20,7 +24,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtGui/QPainterPath>
 #include <QtGui/QPixmap>
 
+#include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace Mwtk::Holo {
 namespace {
@@ -149,38 +155,86 @@ void Layer::paintEvent(QPaintEvent *e) {
 	p.fillRect(inner, band);
 }
 
-// The whole profile as a hologram. Cheap to paint: the scan lines are a
-// tiled pixmap, the rest are two gradients and a frame.
+// The whole profile as a glass hologram card. The real widgets stay
+// below (they get clicks and the wheel), what is seen is their capture:
+// the background keyed out to thin glass (the grey head stays dense), the
+// parts floating at different depths, and what is behind the profile seen
+// through. Holding the right mouse button turns the card in 3D; on release
+// it comes back. A short right click still opens the usual menu.
 class WindowLayer final : public Ui::RpWidget {
 public:
-	WindowLayer(not_null<QWidget*> section);
+	WindowLayer(
+		not_null<QWidget*> section,
+		not_null<QWidget*> head,
+		QWidget *userpic);
 
 protected:
 	void paintEvent(QPaintEvent *e) override;
 
 private:
+	struct Part {
+		QImage image;
+		QRectF rect; // in the section, logical pixels
+		double depth = 0.;
+	};
+
 	void sync();
+	void tick();
+	void capture();
+	void captureBehind();
+	bool filterApp(not_null<QEvent*> e);
+	[[nodiscard]] QPointF project(QPointF point, double depth) const;
+	[[nodiscard]] QPolygonF quad(QRectF rect, double depth) const;
+	void paintCard(QPainter &p);
 
 	const QPointer<QWidget> _section;
+	const QPointer<QWidget> _head;
+	const QPointer<QWidget> _userpic;
 	base::Timer _timer;
 	crl::time _started = 0;
-	crl::time _shown = 0;
+	int _ticks = 0;
+	QImage _behind;
+	QImage _content;
+	std::vector<Part> _parts;
+	QImage _cached;
+	bool _cacheValid = false;
 	QPixmap _lines;
 	QColor _linesColor;
 
+	// Rotation in degrees; the card rests slightly turned.
+	static constexpr auto kRestX = -3.;
+	static constexpr auto kRestY = 5.;
+	double _rx = kRestX;
+	double _ry = kRestY;
+	double _cachedRx = 1000.;
+	double _cachedRy = 1000.;
+	bool _pressed = false;
+	bool _dragging = false;
+	crl::time _eatMenuUntil = 0;
+	QPoint _pressAt;
+	double _pressRx = 0.;
+	double _pressRy = 0.;
+
 };
 
-WindowLayer::WindowLayer(not_null<QWidget*> section)
+WindowLayer::WindowLayer(
+	not_null<QWidget*> section,
+	not_null<QWidget*> head,
+	QWidget *userpic)
 : RpWidget(section)
 , _section(section.get())
-, _timer([=] { update(); })
+, _head(head.get())
+, _userpic(userpic)
+, _timer([=] { tick(); })
 , _started(crl::now()) {
 	setObjectName(u"mwtk-holo-window"_q);
 	setAttribute(Qt::WA_TransparentForMouseEvents);
-	setAttribute(Qt::WA_NoSystemBackground);
+	setAttribute(Qt::WA_OpaquePaintEvent);
 	base::install_event_filter(this, section, [=](not_null<QEvent*> e) {
 		switch (e->type()) {
 		case QEvent::Resize:
+			_behind = QImage();
+			[[fallthrough]];
 		case QEvent::ChildAdded:
 		case QEvent::Show:
 			crl::on_main(this, [=] { sync(); });
@@ -190,11 +244,17 @@ WindowLayer::WindowLayer(not_null<QWidget*> section)
 		}
 		return base::EventFilterResult::Continue;
 	});
+	base::install_event_filter(this, qApp, [=](not_null<QEvent*> e) {
+		return filterApp(e)
+			? base::EventFilterResult::Cancel
+			: base::EventFilterResult::Continue;
+	});
 	rpl::merge(
 		OptionChanges(kOptionHoloProfile),
 		OptionChanges(kOptionPalette),
 		ConfigChanges()
 	) | rpl::on_next([=] {
+		_cacheValid = false;
 		sync();
 	}, lifetime());
 	sync();
@@ -202,6 +262,7 @@ WindowLayer::WindowLayer(not_null<QWidget*> section)
 
 void WindowLayer::sync() {
 	const auto enabled = _section
+		&& _head
 		&& EffectsEnabled()
 		&& OptionValue(kOptionHoloProfile);
 	if (!enabled) {
@@ -210,42 +271,413 @@ void WindowLayer::sync() {
 		return;
 	}
 	setGeometry(_section->rect());
+	if (isHidden()) {
+		_behind = QImage();
+	}
 	show();
 	raise();
 	if (!_timer.isActive()) {
-		// The layer covers a big area: 25 fps is plenty for a slow sweep.
 		_timer.callEach(std::max(crl::time(CurrentQuality().frameDelay), crl::time(40)));
+	}
+	capture();
+	update();
+}
+
+bool WindowLayer::filterApp(not_null<QEvent*> e) {
+	const auto type = e->type();
+	if (type != QEvent::MouseButtonPress
+		&& type != QEvent::MouseMove
+		&& type != QEvent::MouseButtonRelease
+		&& type != QEvent::ContextMenu) {
+		return false;
+	}
+	if (isHidden() || !_section) {
+		return false;
+	}
+	if (type == QEvent::ContextMenu) {
+		const auto eat = (crl::now() < _eatMenuUntil);
+		_eatMenuUntil = 0;
+		return eat;
+	}
+	const auto mouse = static_cast<QMouseEvent*>(e.get());
+	const auto global = mouse->globalPosition().toPoint();
+	if (type == QEvent::MouseButtonPress) {
+		if (mouse->button() != Qt::RightButton) {
+			return false;
+		}
+		const auto under = QApplication::widgetAt(global);
+		if (!under || !_section->isAncestorOf(under)) {
+			return false;
+		}
+		_pressed = true;
+		_dragging = false;
+		_pressAt = global;
+		_pressRx = _rx;
+		_pressRy = _ry;
+		return false; // a short right click still works as usual
+	}
+	if (!_pressed) {
+		return false;
+	}
+	if (type == QEvent::MouseMove) {
+		if (!(mouse->buttons() & Qt::RightButton)) {
+			_pressed = _dragging = false;
+			return false;
+		}
+		const auto delta = global - _pressAt;
+		if (!_dragging && delta.manhattanLength() < 6) {
+			return false;
+		}
+		_dragging = true;
+		_ry = std::clamp(_pressRy + delta.x() * 0.35, -60., 60.);
+		_rx = std::clamp(_pressRx - delta.y() * 0.35, -45., 45.);
+		update();
+		return true;
+	}
+	// Release.
+	if (mouse->button() != Qt::RightButton) {
+		return false;
+	}
+	const auto dragged = _dragging;
+	_pressed = _dragging = false;
+	if (dragged) {
+		// The menu comes right after the release: not this time.
+		_eatMenuUntil = crl::now() + 500;
+	}
+	return dragged;
+}
+
+void WindowLayer::tick() {
+	if (!_section || isHidden()) {
+		return;
+	}
+	if (!_dragging
+		&& (std::abs(_rx - kRestX) > 0.05 || std::abs(_ry - kRestY) > 0.05)) {
+		// Spring back.
+		_rx += (kRestX - _rx) * 0.18;
+		_ry += (kRestY - _ry) * 0.18;
+	}
+	// Fresh content often while the mouse is over the profile (scrolling,
+	// hover), rarely when nobody touches it: it is the costly part.
+	const auto hovered = _section->underMouse() || _dragging;
+	if (_content.isNull() || (++_ticks % (hovered ? 1 : 5)) == 0) {
+		capture();
+	}
+	if (window()->isActiveWindow() || hovered) {
+		update();
+	}
+}
+
+// What is behind the profile: everything below it, level by level.
+void WindowLayer::captureBehind() {
+	const auto ratio = style::DevicePixelRatio();
+	_behind = QImage(size() * ratio, QImage::Format_ARGB32_Premultiplied);
+	_behind.setDevicePixelRatio(ratio);
+	_behind.fill(QColor(8, 9, 14));
+	const auto top = _section->window();
+	auto levels = std::vector<std::vector<QWidget*>>();
+	auto child = _section.data();
+	while (child && child != top) {
+		const auto parent = child->parentWidget();
+		if (!parent) {
+			break;
+		}
+		auto lower = std::vector<QWidget*>();
+		for (const auto object : parent->children()) {
+			if (object == child) {
+				break;
+			}
+			const auto widget = qobject_cast<QWidget*>(object);
+			if (widget && widget->isVisible() && !widget->isWindow()) {
+				lower.push_back(widget);
+			}
+		}
+		levels.push_back(std::move(lower));
+		child = parent;
+	}
+	const auto origin = _section->mapTo(top, QPoint());
+	auto q = QPainter(&_behind);
+	for (auto i = levels.rbegin(); i != levels.rend(); ++i) {
+		for (const auto widget : *i) {
+			const auto at = widget->mapTo(top, QPoint()) - origin;
+			if (!QRect(at, widget->size()).intersects(rect())) {
+				continue;
+			}
+			widget->render(
+				&q,
+				at,
+				QRegion(),
+				QWidget::DrawWindowBackground | QWidget::DrawChildren);
+		}
+	}
+	q.end();
+	// Softly out of focus, like seen through glass.
+	const auto small = _behind.scaled(
+		std::max(_behind.width() / 4, 1),
+		std::max(_behind.height() / 4, 1),
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	_behind = small.scaled(
+		_behind.size(),
+		Qt::IgnoreAspectRatio,
+		Qt::SmoothTransformation);
+	_behind.setDevicePixelRatio(ratio);
+}
+
+void WindowLayer::capture() {
+	if (!_section || !_head || width() <= 0 || height() <= 0) {
+		return;
+	}
+	if (_behind.isNull()) {
+		captureBehind();
+	}
+	const auto ratio = style::DevicePixelRatio();
+	auto shot = QImage(size() * ratio, QImage::Format_ARGB32_Premultiplied);
+	shot.setDevicePixelRatio(ratio);
+	const auto base = st::windowBg->c;
+	shot.fill(base);
+	{
+		auto q = QPainter(&shot);
+		for (const auto child : _section->children()) {
+			const auto widget = qobject_cast<QWidget*>(child);
+			if (!widget || widget == this || widget->isHidden()) {
+				continue;
+			}
+			widget->render(
+				&q,
+				widget->pos(),
+				QRegion(),
+				QWidget::DrawWindowBackground | QWidget::DrawChildren);
+		}
+	}
+
+	// The background becomes thin glass: a pixel is as solid as it is
+	// different from the background color. The grey head stays dense.
+	const auto head = QRect(
+		_head->mapTo(_section, QPoint()),
+		_head->size()).intersected(rect());
+	const auto headTop = head.top() * ratio;
+	const auto headBottom = (head.y() + head.height()) * ratio;
+	const auto br = base.red(), bgc = base.green(), bb = base.blue();
+	for (auto y = 0, h = shot.height(); y != h; ++y) {
+		const auto line = reinterpret_cast<QRgb*>(shot.scanLine(y));
+		const auto minimum = (y >= headTop && y < headBottom) ? 160 : 60;
+		for (auto x = 0, w = shot.width(); x != w; ++x) {
+			const auto c = line[x];
+			const auto diff = std::max({
+				std::abs(qRed(c) - br),
+				std::abs(qGreen(c) - bgc),
+				std::abs(qBlue(c) - bb) });
+			const auto a = std::clamp(std::max(diff * 4 + 10, minimum), 0, 255);
+			line[x] = qRgba(
+				qRed(c) * a / 255,
+				qGreen(c) * a / 255,
+				qBlue(c) * a / 255,
+				a);
+		}
+	}
+	_content = std::move(shot);
+
+	// The parts and their depths.
+	_parts.clear();
+	const auto cut = [&](QRect r) {
+		r = r.intersected(rect());
+		auto result = _content.copy(QRect(r.topLeft() * ratio, r.size() * ratio));
+		result.setDevicePixelRatio(ratio);
+		return result;
+	};
+	const auto avatar = _userpic
+		? QRect(_userpic->mapTo(_section, QPoint()), _userpic->size())
+		: QRect();
+	const auto name = avatar.isEmpty()
+		? QRect()
+		: QRect(
+			head.x() + head.width() / 5,
+			avatar.y() + avatar.height(),
+			head.width() * 3 / 5,
+			std::max(head.y() + head.height() - avatar.y() - avatar.height(), 0));
+	auto headImage = cut(head);
+	if (!avatar.isEmpty()) {
+		auto q = QPainter(&headImage);
+		q.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+		q.setRenderHint(QPainter::Antialiasing);
+		q.setBrush(Qt::black);
+		q.setPen(Qt::NoPen);
+		q.drawEllipse(QRectF(avatar.translated(-head.topLeft())).adjusted(-1, -1, 1, 1));
+		q.fillRect(name.translated(-head.topLeft()), Qt::black);
+	}
+	const auto below = QRect(
+		0,
+		head.y() + head.height(),
+		width(),
+		std::max(height() - head.y() - head.height(), 0));
+	if (!below.isEmpty()) {
+		_parts.push_back({ cut(below), QRectF(below), 26. });
+	}
+	_parts.push_back({ std::move(headImage), QRectF(head), 18. });
+	if (!name.isEmpty()) {
+		_parts.push_back({ cut(name), QRectF(name), 50. });
+	}
+	if (!avatar.isEmpty()) {
+		auto image = cut(avatar);
+		auto round = QImage(image.size(), QImage::Format_ARGB32_Premultiplied);
+		round.setDevicePixelRatio(ratio);
+		round.fill(Qt::transparent);
+		auto q = QPainter(&round);
+		q.setRenderHint(QPainter::Antialiasing);
+		auto circle = QPainterPath();
+		circle.addEllipse(QRectF(QPointF(), QSizeF(avatar.size())));
+		q.setClipPath(circle);
+		q.drawImage(QPointF(), image);
+		q.end();
+		_parts.push_back({ std::move(round), QRectF(avatar), 85. });
+	}
+	_cacheValid = false;
+}
+
+QPointF WindowLayer::project(QPointF point, double depth) const {
+	const auto scale = style::Scale() / 100.;
+	const auto cx = width() / 2., cy = height() / 2.;
+	const auto shrink = 0.9;
+	auto x = (point.x() - cx) * shrink;
+	auto y = (point.y() - cy) * shrink;
+	auto z = depth * scale;
+	const auto ay = _ry * std::numbers::pi / 180.;
+	const auto ax = _rx * std::numbers::pi / 180.;
+	// Around Y, then around X.
+	const auto x1 = x * std::cos(ay) + z * std::sin(ay);
+	const auto z1 = -x * std::sin(ay) + z * std::cos(ay);
+	const auto y2 = y * std::cos(ax) - z1 * std::sin(ax);
+	const auto z2 = y * std::sin(ax) + z1 * std::cos(ax);
+	const auto distance = 1400. * scale;
+	const auto f = distance / std::max(distance - z2, 1.);
+	return { cx + x1 * f, cy + y2 * f };
+}
+
+QPolygonF Corners(QRectF rect) {
+	return QPolygonF({
+		rect.topLeft(),
+		rect.topRight(),
+		rect.bottomRight(),
+		rect.bottomLeft(),
+	});
+}
+
+QPolygonF WindowLayer::quad(QRectF rect, double depth) const {
+	return QPolygonF({
+		project(rect.topLeft(), depth),
+		project(rect.topRight(), depth),
+		project(rect.bottomRight(), depth),
+		project(rect.bottomLeft(), depth),
+	});
+}
+
+void WindowLayer::paintCard(QPainter &p) {
+	const auto accent = PaletteAt(
+		std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
+		0.).first;
+	p.setRenderHint(QPainter::Antialiasing);
+	p.setRenderHint(QPainter::SmoothPixmapTransform);
+
+	// The glass body: a faint tint of the theme color.
+	const auto body = quad(QRectF(rect()), 0.);
+	auto glass = accent;
+	glass.setAlpha(26);
+	p.setPen(Qt::NoPen);
+	p.setBrush(glass);
+	p.drawPolygon(body);
+
+	for (const auto &part : _parts) {
+		const auto target = quad(part.rect, part.depth);
+		auto transform = QTransform();
+		const auto source = Corners(QRectF(QPointF(), part.rect.size()));
+		if (!QTransform::quadToQuad(source, target, transform)) {
+			continue;
+		}
+		p.save();
+		p.setTransform(transform, true);
+		p.drawImage(QPointF(), part.image);
+		p.restore();
 	}
 }
 
 void WindowLayer::paintEvent(QPaintEvent *e) {
 	auto p = QPainter(this);
 	const auto scale = style::Scale() / 100.;
-	const auto active = window()->isActiveWindow();
-	if (active) {
-		_shown = crl::now() - _started;
-	}
-	const auto t = _shown / 1000.;
+	const auto t = (crl::now() - _started) / 1000.;
 	const auto accent = PaletteAt(
 		std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
 		0.).first;
 	const auto full = QRectF(rect());
 
-	// Tint of the theme color, slowly breathing, with a rare flicker.
-	const auto flicker = (std::fmod(t, 5.3) < 0.08) ? 0.5 : 1.;
-	auto tint = accent;
-	tint.setAlphaF(float((0.07 + 0.03 * std::sin(t * 1.3)) * flicker));
-	p.fillRect(full, tint);
+	if (_behind.isNull()) {
+		p.fillRect(rect(), QColor(8, 9, 14));
+	} else {
+		p.drawImage(QPointF(), _behind);
+	}
+
+	// The card itself is cached while it rests: only the light moves.
+	const auto ratio = style::DevicePixelRatio();
+	if (!_cacheValid || _cachedRx != _rx || _cachedRy != _ry
+		|| _cached.size() != size() * ratio) {
+		_cached = QImage(size() * ratio, QImage::Format_ARGB32_Premultiplied);
+		_cached.setDevicePixelRatio(ratio);
+		_cached.fill(Qt::transparent);
+		auto q = QPainter(&_cached);
+		paintCard(q);
+		_cacheValid = true;
+		_cachedRx = _rx;
+		_cachedRy = _ry;
+	}
+	const auto flicker = (std::fmod(t, 6.7) < 0.07) ? 0.6 : 1.;
+	p.setOpacity(flicker);
+	p.drawImage(QPointF(), _cached);
+	p.setOpacity(1.);
+
+	const auto body = quad(full, 0.);
+	auto path = QPainterPath();
+	path.addPolygon(body);
+	path.closeSubpath();
+	p.save();
+	p.setClipPath(path);
+
+	// Now and then a thin slice slips sideways.
+	const auto glitch = std::fmod(t, 3.1);
+	if (glitch < 0.11 && !_content.isNull()) {
+		const auto seed = int(std::floor(t / 3.1));
+		const auto y = full.height() * (((seed * 7919) % 1000) / 1000.);
+		const auto h = (6 + (seed % 10)) * scale;
+		const auto dx = ((seed % 2) ? 1 : -1) * (6 + seed % 8) * scale;
+		const auto slice = QRectF(0., y, full.width(), h);
+		auto transform = QTransform();
+		if (QTransform::quadToQuad(
+				Corners(slice),
+				quad(slice.translated(dx, 0.), 30.),
+				transform)) {
+			p.save();
+			p.setTransform(transform, true);
+			p.setOpacity(0.85);
+			p.drawImage(
+				slice,
+				_content,
+				QRectF(
+					slice.x() * ratio,
+					slice.y() * ratio,
+					slice.width() * ratio,
+					slice.height() * ratio));
+			p.restore();
+		}
+	}
 
 	// Scan lines moving down (a tiled pixmap, made once per color).
-	const auto step = std::max(int(4 * scale), 3);
+	const auto step = std::max(int(3 * scale), 2);
 	if (_lines.isNull() || _linesColor != accent) {
 		_linesColor = accent;
 		_lines = QPixmap(QSize(64, step * 16));
 		_lines.fill(Qt::transparent);
 		auto q = QPainter(&_lines);
-		auto line = accent.lighter(160);
-		line.setAlpha(26);
+		auto line = accent.lighter(170);
+		line.setAlpha(18);
 		for (auto y = 0; y < _lines.height(); y += step) {
 			q.fillRect(0, y, _lines.width(), 1, line);
 		}
@@ -253,37 +685,43 @@ void WindowLayer::paintEvent(QPaintEvent *e) {
 	const auto shift = int(std::fmod(t * 18. * scale, double(step * 16)));
 	p.drawTiledPixmap(rect(), _lines, QPoint(0, -shift));
 
-	// A light sweep crossing the window from time to time.
-	const auto phase = std::fmod(t / 4.5, 1.);
-	const auto y = full.top() - full.height() * 0.4 + phase * full.height() * 1.8;
-	auto band = QLinearGradient(QPointF(0., y), QPointF(0., y + full.height() * 0.25));
-	auto light = accent.lighter(170);
-	light.setAlpha(0);
-	band.setColorAt(0., light);
-	light.setAlpha(34);
-	band.setColorAt(0.5, light);
-	light.setAlpha(0);
-	band.setColorAt(1., light);
-	p.fillRect(full, band);
+	// A light sheen that follows the turn of the card.
+	const auto along = 0.5 - _ry / 90.;
+	const auto sx = full.width() * along;
+	auto sheen = QLinearGradient(
+		QPointF(sx - full.width() * 0.5, 0.),
+		QPointF(sx + full.width() * 0.5, full.height() * 0.6));
+	sheen.setColorAt(0., QColor(255, 255, 255, 0));
+	sheen.setColorAt(0.45, QColor(255, 255, 255, 28));
+	sheen.setColorAt(0.5, QColor(120, 230, 255, 30));
+	auto pinkish = accent;
+	pinkish.setAlpha(26);
+	sheen.setColorAt(0.55, pinkish);
+	sheen.setColorAt(1., QColor(255, 255, 255, 0));
+	p.fillRect(full, sheen);
+	p.restore();
 
-	// A shining iridescent frame.
+	// A shining iridescent frame around the glass.
 	p.setRenderHint(QPainter::Antialiasing);
-	auto rim = QConicalGradient(full.center(), std::fmod(t * 30., 360.));
+	auto rim = QConicalGradient(full.center(), std::fmod(t * 60., 360.));
 	rim.setColorAt(0., accent);
-	rim.setColorAt(0.25, accent.lighter(150));
-	rim.setColorAt(0.5, QColor(0, 230, 255));
-	rim.setColorAt(0.75, accent.lighter(130));
+	rim.setColorAt(0.33, QColor(80, 225, 255));
+	rim.setColorAt(0.66, QColor(176, 107, 255));
 	rim.setColorAt(1., accent);
 	p.setBrush(Qt::NoBrush);
-	const auto width = 2. * scale;
-	p.setPen(QPen(QBrush(rim), width));
-	p.setOpacity(0.85);
-	p.drawRect(full.adjusted(width / 2., width / 2., -width / 2., -width / 2.));
+	for (auto i = 3; i != 0; --i) {
+		p.setOpacity(0.12 * (4 - i));
+		p.setPen(QPen(QBrush(rim), (1.5 + i * 2.5) * scale));
+		p.drawPolygon(body);
+	}
+	p.setOpacity(0.95);
+	p.setPen(QPen(QBrush(rim), 2. * scale));
+	p.drawPolygon(body);
 }
 
 } // namespace
 
-void AttachWindow(not_null<QWidget*> inside) {
+void AttachWindow(not_null<QWidget*> inside, QWidget *userpic) {
 	auto section = inside->parentWidget();
 	while (section && !dynamic_cast<Info::WrapWidget*>(section)) {
 		section = section->parentWidget();
@@ -294,7 +732,7 @@ void AttachWindow(not_null<QWidget*> inside) {
 			Qt::FindDirectChildrenOnly)) {
 		return;
 	}
-	new WindowLayer(not_null<QWidget*>(section)); // owned by the section
+	new WindowLayer(not_null<QWidget*>(section), inside, userpic); // owned by the section
 }
 
 void Attach(not_null<QWidget*> userpic) {

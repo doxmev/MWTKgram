@@ -272,7 +272,7 @@ edit("TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java", replace
 edit("TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java", replace_once(
     "        FrameLayout frameLayout = (FrameLayout) fragmentView;\n",
     "        FrameLayout frameLayout = (FrameLayout) fragmentView;\n"
-    "        org.telegram.mwtk.MwtkHolo.attachWindow(frameLayout);\n"))
+    "        org.telegram.mwtk.MwtkHolo.attachWindow(this, frameLayout);\n"))
 
 # MWTK theme and sync files open in the app.
 edit("TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java", replace_once(

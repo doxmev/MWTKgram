@@ -165,7 +165,7 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "Пульсирующая точка", "Медленно «дышит»", MwtkConfig.PULSE);
         toggle(context, "Аватарка-плитка", "Квадрат со скруглёнными углами", MwtkConfig.TILE);
         flag(context, "Пролёт аватарки", "Новое сообщение пролетает над списком", MwtkConfig.FLYBY, true);
-        flag(context, "Голографический профиль", "Весь профиль — голограмма цвета темы", MwtkConfig.HOLO, true);
+        flag(context, "Голографический профиль", "Профиль — стеклянная голограмма, поворачивается наклоном телефона", MwtkConfig.HOLO, true);
         shadow(context);
     }
 

@@ -528,7 +528,9 @@ TopBar::TopBar(
 		Mwtk::Holo::Attach(_userpicButton.get());
 	}
 	// The section is built around the top bar: attach once it is in place.
-	crl::on_main(this, [=] { Mwtk::Holo::AttachWindow(this); });
+	crl::on_main(this, [=] {
+		Mwtk::Holo::AttachWindow(this, _userpicButton.get());
+	});
 	if (_hasActions) {
 		_peer->session().changes().peerFlagsValue(
 			_peer,

@@ -12,9 +12,9 @@ namespace Mwtk::Holo {
 // over a profile userpic. Follows the widget geometry, ignores the mouse.
 void Attach(not_null<QWidget*> userpic);
 
-// Turns the whole profile window into a hologram of the theme color:
-// tint, moving scan lines, a light sweep, flicker and a shining frame.
-// `inside` is any widget of the profile; the layer covers its section.
-void AttachWindow(not_null<QWidget*> inside);
+// Turns the profile into a glass hologram card that can be turned in 3D
+// by holding the right mouse button. `head` is the top bar of the profile
+// (it stays dense), `userpic` floats above the card; it may be null.
+void AttachWindow(not_null<QWidget*> head, QWidget *userpic = nullptr);
 
 } // namespace Mwtk::Holo
