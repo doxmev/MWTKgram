@@ -108,7 +108,9 @@ jobs:
         if: failure()
         run: |
           [ -f gradle.log ] || { echo "::error title=Build log::No gradle log"; exit 0; }
-          grep -aE "error:|e: |FAILURE|What went wrong|\* What went wrong|Execution failed|Caused by|> " gradle.log | head -n 60 > errors.txt || true
+          # Real compiler errors first, then Gradle's explanation; never the task list.
+          grep -aE "\.(java|kt):[0-9]+: (error|e):|^e: |error: " gradle.log | grep -av "> Task" | head -n 40 > errors.txt || true
+          grep -aA14 "What went wrong" gradle.log | grep -av "> Task" | head -n 30 >> errors.txt || true
           [ -s errors.txt ] || tail -n 60 gradle.log > errors.txt
           split -l 12 errors.txt chunk_
           for CHUNK in chunk_*; do
