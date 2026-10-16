@@ -905,15 +905,15 @@ public final class MwtkLyrics {
             android.graphics.RectF placed = new android.graphics.RectF(minX + shiftX, minY + shiftY, maxX + shiftX, maxY + shiftY);
             float overlapNow = overlap(placed, avoid);
             if (overlapNow > 0) {
-                float gap = base * 0.4f;
+                float avoidGap = base * 0.4f;
                 float bestX = 0, bestY = 0, bestOverlap = overlapNow, bestDistance = 0;
                 android.graphics.RectF moved = new android.graphics.RectF();
                 for (android.graphics.RectF other : avoid) {
                     float[][] options = {
-                        { 0, other.top - gap - placed.bottom },
-                        { 0, other.bottom + gap - placed.top },
-                        { other.left - gap - placed.right, 0 },
-                        { other.right + gap - placed.left, 0 },
+                        { 0, other.top - avoidGap - placed.bottom },
+                        { 0, other.bottom + avoidGap - placed.top },
+                        { other.left - avoidGap - placed.right, 0 },
+                        { other.right + avoidGap - placed.left, 0 },
                     };
                     for (float[] o : options) {
                         moved.set(placed);
