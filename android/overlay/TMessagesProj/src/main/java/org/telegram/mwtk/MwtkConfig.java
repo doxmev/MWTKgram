@@ -178,6 +178,9 @@ public final class MwtkConfig {
     public static final String TABLET = "tablet";
     public static final String LYRICS_APPEAR = "lyrics_appear";
     public static final String LYRICS_DRIFT = "lyrics_drift";
+    public static final String LYRICS_BEAT = "lyrics_beat";
+    public static final String GIFTS_ARCHIVED = "gifts_archived";
+    public static final String TOGETHER_ALLOW = "together_allow";
     public static final String FLOAT_COUNT = "float_count";
     public static final String FLOAT_SOURCE = "float_source";
     public static final String FLOAT_PICKED = "float_picked";
@@ -306,6 +309,11 @@ public final class MwtkConfig {
 
     public static void removeListener(Runnable listener) {
         listeners.remove(listener);
+    }
+
+    /** Something outside the settings changed (for example a song cover): views refresh. */
+    public static void changedExternally() {
+        changed();
     }
 
     private static void changed() {

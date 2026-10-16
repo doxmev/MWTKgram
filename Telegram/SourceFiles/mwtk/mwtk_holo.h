@@ -12,4 +12,9 @@ namespace Mwtk::Holo {
 // over a profile userpic. Follows the widget geometry, ignores the mouse.
 void Attach(not_null<QWidget*> userpic);
 
+// Turns the whole profile window into a hologram of the theme color:
+// tint, moving scan lines, a light sweep, flicker and a shining frame.
+// `inside` is any widget of the profile; the layer covers its section.
+void AttachWindow(not_null<QWidget*> inside);
+
 } // namespace Mwtk::Holo

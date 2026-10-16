@@ -21,6 +21,7 @@ public final class MwtkChatMenu {
     public static final int RENAME = 7702;
     public static final int NOTE = 7703;
     public static final int DELETED = 7704;
+    public static final int TOGETHER = 7705;
 
     public static final int OPTION_REMIND = 7801;
     public static final int OPTION_PLAYLIST = 7802;
@@ -43,6 +44,10 @@ public final class MwtkChatMenu {
         headerItem.lazilyAddSubItem(RENAME, R.drawable.msg_edit, "Своё название (MWTK)");
         headerItem.lazilyAddSubItem(NOTE, R.drawable.msg_info, "Заметка MWTK");
         headerItem.lazilyAddSubItem(DELETED, R.drawable.msg_delete, "Удалённые сообщения (MWTK)");
+        if (dialogId > 0 && dialogId != org.telegram.messenger.UserConfig.getInstance(chat.getCurrentAccount()).getClientUserId()) {
+            headerItem.lazilyAddSubItem(TOGETHER, R.drawable.msg_filled_data_music,
+                MwtkTogether.activeWith(dialogId) ? "Закончить слушать вместе" : "Слушать музыку вместе (MWTK)");
+        }
     }
 
     public static boolean handle(ChatActivity chat, int id) {
@@ -76,6 +81,13 @@ public final class MwtkChatMenu {
             }
             case DELETED:
                 showDeleted(chat, dialogId);
+                return true;
+            case TOGETHER:
+                if (MwtkTogether.activeWith(dialogId)) {
+                    MwtkTogether.end();
+                } else {
+                    MwtkTogether.invite(chat, dialogId);
+                }
                 return true;
         }
         return false;

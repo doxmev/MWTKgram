@@ -268,6 +268,12 @@ edit("TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java", replace
     "        avatarContainer.addView(avatarImage, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));\n"
     "        org.telegram.mwtk.MwtkHolo.attach(avatarContainer, avatarImage);\n"))
 
+# The whole profile window as a hologram of the theme color.
+edit("TMessagesProj/src/main/java/org/telegram/ui/ProfileActivity.java", replace_once(
+    "        FrameLayout frameLayout = (FrameLayout) fragmentView;\n",
+    "        FrameLayout frameLayout = (FrameLayout) fragmentView;\n"
+    "        org.telegram.mwtk.MwtkHolo.attachWindow(frameLayout);\n"))
+
 # MWTK theme and sync files open in the app.
 edit("TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java", replace_once(
     "        String mimeType = message.type == MessageObject.TYPE_FILE || message.type == MessageObject.TYPE_TEXT ? message.getMimeType() : null;\n"
@@ -277,3 +283,18 @@ edit("TMessagesProj/src/main/java/org/telegram/messenger/AndroidUtilities.java",
     "        }\n"
     "        String mimeType = message.type == MessageObject.TYPE_FILE || message.type == MessageObject.TYPE_TEXT ? message.getMimeType() : null;\n"
     "        return openForView(f, message.getFileName(), mimeType, activity, resourcesProvider, restrict);"))
+
+# Archive of gifts: archived gifts are hidden from your own profile list.
+edit("TMessagesProj/src/main/java/org/telegram/ui/Stars/StarsController.java", replace_once(
+    "                    gifts.addAll(rez.gifts);\n",
+    "                    gifts.addAll(org.telegram.mwtk.MwtkGifts.filter(GiftsList.this, rez.gifts));\n"))
+edit("TMessagesProj/src/main/java/org/telegram/ui/Gifts/ProfileGiftsContainer.java", replace_once(
+    "                final ItemOptions o = ItemOptions.makeOptions(parent.fragment, view, true);\n"
+    "                parent.currentMenu = o;\n",
+    "                final ItemOptions o = ItemOptions.makeOptions(parent.fragment, view, true);\n"
+    "                parent.currentMenu = o;\n"
+    "                if (parent.collections.isMine()) {\n"
+    "                    final boolean mwtkArchived = org.telegram.mwtk.MwtkGifts.isArchived(savedStarGift);\n"
+    "                    o.add(R.drawable.msg_archive, mwtkArchived ? \"Вернуть из архива\" : \"В архив (скрыть у себя)\", () -> org.telegram.mwtk.MwtkGifts.toggle(list, savedStarGift));\n"
+    "                    o.add(R.drawable.msg_archive, org.telegram.mwtk.MwtkGifts.showingArchived() ? \"Спрятать архив подарков\" : \"Показать архив подарков\", () -> org.telegram.mwtk.MwtkGifts.toggleShowArchived(list));\n"
+    "                }\n"))

@@ -292,6 +292,20 @@ public final class MwtkLyrics {
         return "lyrics_" + hash(key) + ext;
     }
 
+    /** Lines of the song that plays now (empty when there is no text yet). */
+    public static ArrayList<Line> currentLines() {
+        MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
+        if (playing != null && playing.isMusic()) {
+            track(playing);
+        }
+        return lines;
+    }
+
+    /** Position in the song for the lines, with your shift of the text. */
+    public static long currentPosition() {
+        return MediaController.getInstance().getCurrentPosition() + (currentKey != null ? offsetFor(currentKey) : 0);
+    }
+
     private static long offsetFor(String key) {
         return MwtkStore.readJson("lyrics_offsets.json").optLong(key, 0);
     }
@@ -570,10 +584,17 @@ public final class MwtkLyrics {
         private long lastFrame;
         private final ImageReceiver cover = new ImageReceiver(this);
         private int coverMessageId;
+        private int coverVersion;
         private long coverDialogId;
         private final android.graphics.RectF coverRect = new android.graphics.RectF();
         private final android.graphics.RectF tmpRect = new android.graphics.RectF();
         private float beat;
+        private static final long WAVE_LIFE = 1100;
+        private final ArrayList<long[]> waves = new ArrayList<>(); // born ms, strength ‰
+        private long lastWave;
+        private android.graphics.SweepGradient waveShader;
+        private int waveAccent;
+        private final android.graphics.Matrix waveMatrix = new android.graphics.Matrix();
 
         LyricsView(Context context) {
             super(context);
@@ -680,9 +701,12 @@ public final class MwtkLyrics {
 
         private void poll() {
             MwtkTaste.tick();
+            MwtkTogether.tick();
             MessageObject playing = MediaController.getInstance().getPlayingMessageObject();
             boolean music = playing != null && playing.isMusic();
-            track(music && enabled() ? playing : null);
+            // The text is loaded even with the flying lyrics off: the list
+            // and the karaoke use it too.
+            track(music ? playing : null);
             boolean active = music && enabled() && !lines.isEmpty();
             boolean playingNow = active && !MediaController.getInstance().isMessagePaused();
             boolean hide = active && MwtkConfig.flag(MwtkConfig.HIDE_CHATS, false);
@@ -865,6 +889,53 @@ public final class MwtkLyrics {
             float shiftX = minX < area.left ? area.left - minX : (maxX > area.right ? area.right - maxX : 0);
             float shiftY = minY < area.top ? area.top - minY : (maxY > area.bottom ? area.bottom - maxY : 0);
 
+            // Do not land on the words of a line that is still on screen:
+            // move up / down / sideways to the nearest free place.
+            ArrayList<android.graphics.RectF> avoid = new ArrayList<>();
+            for (ArrayList<Word> words : layouts) {
+                for (Word w : words) {
+                    if (w.gone || w.dim == null) {
+                        continue;
+                    }
+                    float hw = w.dim.getWidth() / 2f;
+                    float hh = w.dim.getHeight() / 2f;
+                    avoid.add(new android.graphics.RectF(w.x - hw, w.y - hh, w.x + hw, w.y + hh));
+                }
+            }
+            android.graphics.RectF placed = new android.graphics.RectF(minX + shiftX, minY + shiftY, maxX + shiftX, maxY + shiftY);
+            float overlapNow = overlap(placed, avoid);
+            if (overlapNow > 0) {
+                float gap = base * 0.4f;
+                float bestX = 0, bestY = 0, bestOverlap = overlapNow, bestDistance = 0;
+                android.graphics.RectF moved = new android.graphics.RectF();
+                for (android.graphics.RectF other : avoid) {
+                    float[][] options = {
+                        { 0, other.top - gap - placed.bottom },
+                        { 0, other.bottom + gap - placed.top },
+                        { other.left - gap - placed.right, 0 },
+                        { other.right + gap - placed.left, 0 },
+                    };
+                    for (float[] o : options) {
+                        moved.set(placed);
+                        moved.offset(o[0], o[1]);
+                        if (moved.top < area.top - 1 || moved.bottom > area.bottom + 1
+                            || moved.left < area.left - 1 || moved.right > area.right + 1) {
+                            continue;
+                        }
+                        float ov = overlap(moved, avoid);
+                        float distance = Math.abs(o[0]) + Math.abs(o[1]);
+                        if (ov < bestOverlap - 1 || (Math.abs(ov - bestOverlap) <= 1 && distance < bestDistance)) {
+                            bestX = o[0];
+                            bestY = o[1];
+                            bestOverlap = ov;
+                            bestDistance = distance;
+                        }
+                    }
+                }
+                shiftX += bestX;
+                shiftY += bestY;
+            }
+
             // Where the words fly in from.
             android.graphics.RectF coverBox = new android.graphics.RectF();
             coverTarget(coverMode(index), coverBox);
@@ -900,6 +971,18 @@ public final class MwtkLyrics {
                 w.lit = render(w.text, size, true, style, accent);
             }
             return result;
+        }
+
+        private float overlap(android.graphics.RectF rect, ArrayList<android.graphics.RectF> others) {
+            float total = 0;
+            for (android.graphics.RectF other : others) {
+                float w = Math.min(rect.right, other.right) - Math.max(rect.left, other.left);
+                float h = Math.min(rect.bottom, other.bottom) - Math.max(rect.top, other.top);
+                if (w > 0 && h > 0) {
+                    total += w * h;
+                }
+            }
+            return total;
         }
 
         private void shatter(Word w, float x, float y) {
@@ -964,12 +1047,17 @@ public final class MwtkLyrics {
             if (playing == null) {
                 return;
             }
-            if (playing.getId() != coverMessageId || playing.getDialogId() != coverDialogId) {
+            if (playing.getId() != coverMessageId || playing.getDialogId() != coverDialogId
+                || coverVersion != MwtkCovers.version()) {
                 coverMessageId = playing.getId();
                 coverDialogId = playing.getDialogId();
+                coverVersion = MwtkCovers.version();
                 TLRPC.Document document = playing.getDocument();
                 TLRPC.PhotoSize thumb = document != null ? FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 320) : null;
-                if (thumb != null) {
+                android.graphics.Bitmap custom = MwtkCovers.get(playing);
+                if (custom != null) {
+                    cover.setImageBitmap(custom); // your own cover
+                } else if (thumb != null) {
                     cover.setImage(ImageLocation.getForDocument(thumb, document), "320_320", null, null, playing, 0);
                 } else {
                     cover.setImageBitmap((android.graphics.drawable.Drawable) null);
@@ -997,24 +1085,64 @@ public final class MwtkLyrics {
             float zoom = 1f + 0.10f * beat;
             int accent = MwtkConfig.accent();
 
-            // A ring of bars around the cover jumping with the music.
-            float[] values = spectrum(seconds, 48);
-            paint.setStyle(Paint.Style.STROKE);
-            paint.setStrokeCap(Paint.Cap.ROUND);
-            paint.setStrokeWidth(Math.max(AndroidUtilities.dp(2.5f), half * 0.035f));
-            float inner = half * 1.48f * zoom;
-            float longest = half * 0.45f;
-            for (int i = 0; i < values.length; i++) {
-                double a = i * 2 * Math.PI / values.length - Math.PI / 2;
-                float v = Math.min(1f, 0.06f + values[i] + beat * 0.25f);
-                paint.setColor(accent);
-                paint.setAlpha((int) (120 + 120 * v));
-                float c = (float) Math.cos(a);
-                float sn = (float) Math.sin(a);
-                canvas.drawLine(cx + c * inner, cy + sn * inner, cx + c * (inner + longest * v), cy + sn * (inner + longest * v), paint);
+            // Glow waves that leave the edges of the cover on every beat and
+            // roll around it: a bright arc runs along each wave.
+            boolean playingNow = !MediaController.getInstance().isMessagePaused();
+            if (playingNow) {
+                if (beat > 0.55f && frame - lastWave > 220) {
+                    waves.add(new long[] { frame, (long) (1000 * Math.max(0.55f, Math.min(1f, beat))) });
+                    lastWave = frame;
+                } else if (frame - lastWave > 1400) {
+                    waves.add(new long[] { frame, 350 }); // calm music: a soft wave
+                    lastWave = frame;
+                }
             }
+            for (int i = waves.size() - 1; i >= 0; i--) {
+                if (frame - waves.get(i)[0] >= WAVE_LIFE) {
+                    waves.remove(i);
+                }
+            }
+            while (waves.size() > 8) {
+                waves.remove(0);
+            }
+            if (waveShader == null || waveAccent != accent) {
+                waveAccent = accent;
+                int bright = Color.argb(255, Math.min(255, Color.red(accent) + 90), Math.min(255, Color.green(accent) + 90), Math.min(255, Color.blue(accent) + 90));
+                int mid = Color.argb(140, Color.red(accent), Color.green(accent), Color.blue(accent));
+                int dim = Color.argb(46, Color.red(accent), Color.green(accent), Color.blue(accent));
+                waveShader = new android.graphics.SweepGradient(0, 0,
+                    new int[] { bright, mid, dim, mid, bright },
+                    new float[] { 0f, 0.18f, 0.5f, 0.82f, 1f });
+            }
+            float roll = (seconds * 110f) % 360f;
+            float radius = AndroidUtilities.dp(18);
+            canvas.save();
+            canvas.translate(cx, cy);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setShader(waveShader);
+            for (long[] wave : waves) {
+                float age = (frame - wave[0]) / (float) WAVE_LIFE;
+                float ease = 1f - (1f - age) * (1f - age);
+                float grow = half * (0.03f + 0.55f * ease) * zoom;
+                waveMatrix.setRotate(roll + age * 140f);
+                waveShader.setLocalMatrix(waveMatrix);
+                paint.setAlpha((int) (255 * (wave[1] / 1000f) * (1f - age) * (1f - age)));
+                paint.setStrokeWidth(Math.max(half * 0.07f * (1f - age), AndroidUtilities.dp(1.5f)));
+                float side = half * zoom + grow;
+                tmpRect.set(-side, -side, side, side);
+                canvas.drawRoundRect(tmpRect, radius + grow, radius + grow, paint);
+            }
+            // The edge itself glows and the bright arc rolls around it.
+            waveMatrix.setRotate(roll);
+            waveShader.setLocalMatrix(waveMatrix);
+            paint.setAlpha((int) (255 * (0.55f + 0.45f * beat)));
+            paint.setStrokeWidth(Math.max(half * (0.03f + 0.04f * beat), AndroidUtilities.dp(2)));
+            float edge = half * zoom * 1.02f;
+            tmpRect.set(-edge, -edge, edge, edge);
+            canvas.drawRoundRect(tmpRect, radius, radius, paint);
+            paint.setShader(null);
             paint.setStyle(Paint.Style.FILL);
-            paint.setStrokeCap(Paint.Cap.BUTT);
+            canvas.restore();
 
             canvas.save();
             canvas.translate(cx, cy);
@@ -1090,6 +1218,8 @@ public final class MwtkLyrics {
                 float motion = MwtkConfig.num(MwtkConfig.LYRICS_MOTION, 60) / 100f;
                 int vanish = MwtkConfig.num(MwtkConfig.LYRICS_VANISH, 0);
                 int drift = MwtkConfig.num(MwtkConfig.LYRICS_DRIFT, 0);
+                // «Текст дёргается в бит» off: words stay calm, the cover still pulses.
+                float textBeat = MwtkConfig.flag(MwtkConfig.LYRICS_BEAT, true) ? beat : 0f;
                 float seconds = frame / 1000f;
                 for (ArrayList<Word> words : layouts) {
                     for (Word w : words) {
@@ -1114,9 +1244,9 @@ public final class MwtkLyrics {
                                 break;
                             }
                             case 3: // shake on the beat
-                                dx = (float) Math.sin(seconds * 37f + w.phase * 5f) * AndroidUtilities.dp(6) * beat
+                                dx = (float) Math.sin(seconds * 37f + w.phase * 5f) * AndroidUtilities.dp(6) * textBeat
                                     + (float) Math.sin(seconds * 0.9f + w.phase) * AndroidUtilities.dp(2) * motion;
-                                dy = (float) Math.cos(seconds * 41f + w.phase * 3f) * AndroidUtilities.dp(5) * beat
+                                dy = (float) Math.cos(seconds * 41f + w.phase * 3f) * AndroidUtilities.dp(5) * textBeat
                                     + (float) Math.cos(seconds * 1.1f + w.phase) * AndroidUtilities.dp(2) * motion;
                                 break;
                             default: // float
@@ -1129,7 +1259,7 @@ public final class MwtkLyrics {
                         float y = w.y + w.fromY * (1 - ease) + dy;
                         float alpha = ease;
                         boolean singing = now >= w.start && now < w.out;
-                        float scale = (0.3f + 0.7f * ease) * (1f + (singing ? 0.14f : 0.06f) * beat);
+                        float scale = (0.3f + 0.7f * ease) * (1f + (singing ? 0.14f : 0.06f) * textBeat);
                         if (now >= w.out) {
                             if (vanish == 0) {
                                 shatter(w, x, y);

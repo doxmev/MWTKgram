@@ -42,6 +42,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "mtproto/sender.h"
+#include "mwtk/mwtk_options.h"
+#include "base/options.h"
 #include "window/window_session_controller.h"
 #include "settings/settings_credits_graphics.h"
 #include "styles/style_info.h"
@@ -54,6 +56,35 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 namespace Info::PeerGifts {
 namespace {
+
+// MWTK: gifts you put in the archive disappear from your own profile in
+// this client (the official Telegram can only hide them from others).
+[[nodiscard]] QString MwtkGiftKey(const Data::SavedStarGift &gift) {
+	return QString::number(gift.info.id)
+		+ '_' + QString::number(gift.date)
+		+ '_' + QString::number(gift.fromId.value);
+}
+
+[[nodiscard]] QStringList MwtkArchivedKeys() {
+	return Mwtk::OptionString(Mwtk::kOptionGiftsArchived).split(
+		',',
+		Qt::SkipEmptyParts);
+}
+
+[[nodiscard]] bool MwtkArchived(const Data::SavedStarGift &gift) {
+	return MwtkArchivedKeys().contains(MwtkGiftKey(gift));
+}
+
+void MwtkSetArchived(const Data::SavedStarGift &gift, bool archived) {
+	auto keys = MwtkArchivedKeys();
+	const auto key = MwtkGiftKey(gift);
+	keys.removeAll(key);
+	if (archived) {
+		keys.push_back(key);
+	}
+	base::options::lookup<QString>(Mwtk::kOptionGiftsArchived).set(
+		keys.join(','));
+}
 
 constexpr auto kPreloadPages = 2;
 constexpr auto kPerPage = 50;
@@ -274,6 +305,13 @@ private:
 	not_null<std::vector<Entry>*> _list;
 	rpl::variable<Data::GiftsUpdate> _collectionChanges;
 	base::flat_set<Data::SavedStarGiftId> _inCollection;
+
+	// MWTK gift archive (own profile only).
+	void mwtkArchive(int index);
+	void mwtkUnarchive(int index);
+	void mwtkToggleShowArchived();
+	std::vector<Entry> _mwtkArchived;
+	bool _mwtkShowArchived = false;
 
 	MTP::Sender _api;
 	mtpRequestId _loadMoreRequestId = 0;
@@ -727,7 +765,10 @@ void InnerWidget::loaded(const MTPpayments_SavedStarGifts &result) {
 			}
 			markInCollection(*parsed);
 			auto descriptor = DescriptorForGift(_peer, *parsed);
-			_list->push_back({
+			const auto archived = _peer->isSelf()
+				&& !_mwtkShowArchived
+				&& MwtkArchived(*parsed);
+			(archived ? _mwtkArchived : *_list).push_back({
 				.gift = std::move(*parsed),
 				.descriptor = std::move(descriptor),
 			});
@@ -1221,10 +1262,68 @@ void InnerWidget::showMenuFor(not_null<GiftButton*> button, QPoint point) {
 		}
 	}
 
+	if (_peer->isSelf() && !_addingToCollectionId) {
+		const auto archived = MwtkArchived((*_list)[index].gift);
+		_menu->addAction(
+			(archived
+				? QString::fromUtf8("Вернуть из архива")
+				: QString::fromUtf8("В архив (скрыть у себя)")),
+			[=] {
+				if (archived) {
+					mwtkUnarchive(index);
+				} else {
+					mwtkArchive(index);
+				}
+			},
+			&st::menuIconArchive);
+	}
+
 	if (_menu->empty()) {
 		return;
 	}
 	_menu->popup(point);
+}
+
+void InnerWidget::mwtkArchive(int index) {
+	if (index < 0 || index >= int(_list->size())) {
+		return;
+	}
+	MwtkSetArchived((*_list)[index].gift, true);
+	if (!_mwtkShowArchived) {
+		_mwtkArchived.push_back(std::move((*_list)[index]));
+		_list->erase(_list->begin() + index);
+	}
+	refreshButtons();
+	_window->showToast(QString::fromUtf8(
+		"Подарок в архиве. Посмотреть: ⋯ → «Показать архив подарков»."));
+}
+
+void InnerWidget::mwtkUnarchive(int index) {
+	if (index < 0 || index >= int(_list->size())) {
+		return;
+	}
+	MwtkSetArchived((*_list)[index].gift, false);
+	refreshButtons();
+}
+
+void InnerWidget::mwtkToggleShowArchived() {
+	_mwtkShowArchived = !_mwtkShowArchived;
+	if (_mwtkShowArchived) {
+		for (auto &entry : _mwtkArchived) {
+			_list->push_back(std::move(entry));
+		}
+		_mwtkArchived.clear();
+	} else {
+		for (auto i = _list->begin(); i != _list->end();) {
+			if (MwtkArchived(i->gift)) {
+				_mwtkArchived.push_back(std::move(*i));
+				i = _list->erase(i);
+			} else {
+				++i;
+			}
+		}
+	}
+	refreshButtons();
 }
 
 void InnerWidget::showGift(int index) {
@@ -1776,6 +1875,14 @@ void InnerWidget::fillMenu(const Ui::Menu::MenuCallback &addAction) {
 	};
 
 	const auto collectionId = descriptor.collectionId;
+	if (_peer->isSelf()) {
+		addAction(
+			(_mwtkShowArchived
+				? QString::fromUtf8("Спрятать архив подарков")
+				: QString::fromUtf8("Показать архив подарков")),
+			[=] { mwtkToggleShowArchived(); },
+			&st::menuIconArchive);
+	}
 	if (!collectionId) {
 		if (filter.sortByValue) {
 			addAction(tr::lng_peer_gifts_filter_by_date(tr::now), [=] {

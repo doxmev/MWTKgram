@@ -75,15 +75,65 @@ public class MwtkSettingsActivity extends BaseFragment {
 
     private static final String[] CHAT_FX_MODES = { "Выкл.", "Поверх обоев" };
 
+    private static final String[] TABS = { "Вид", "Музыка", "Чаты", "Ещё" };
+    private static int tab;
+
+    /** Tabs on top: «Вид», «Музыка», «Чаты», «Ещё»; only one page is shown. */
+    private void tabs(Context context) {
+        LinearLayout row = new LinearLayout(context);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10), AndroidUtilities.dp(10));
+        row.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        int accent = MwtkConfig.accent();
+        for (int i = 0; i < TABS.length; i++) {
+            final int index = i;
+            android.widget.TextView button = new android.widget.TextView(context);
+            button.setText(TABS[i]);
+            button.setGravity(android.view.Gravity.CENTER);
+            button.setTextSize(15);
+            button.setTypeface(AndroidUtilities.bold());
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setCornerRadius(AndroidUtilities.dp(12));
+            if (i == tab) {
+                bg.setColor(accent);
+                button.setTextColor(0xffffffff);
+            } else {
+                bg.setColor(Theme.getColor(Theme.key_windowBackgroundGray));
+                button.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            }
+            button.setBackground(bg);
+            button.setOnClickListener(v -> {
+                if (tab != index) {
+                    tab = index;
+                    MwtkMotion.vibrate(15);
+                    rebuild();
+                }
+            });
+            row.addView(button, LayoutHelper.createLinear(0, 40, 1f, i == 0 ? 0 : 6, 0, 0, 0));
+        }
+        list.addView(row, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
     private void build(Context context) {
         header(context, "Главное");
         toggle(context, "Все эффекты MWTKgram", "Можно встряхнуть телефон, чтобы выключить", MwtkConfig.EFFECTS);
+        tabs(context);
+        shadow(context);
+        switch (tab) {
+            case 1: buildMusic(context); break;
+            case 2: buildChats(context); break;
+            case 3: buildOther(context); break;
+            default: buildLook(context); break;
+        }
+    }
+
+    private void buildLook(Context context) {
+        header(context, "Оформление");
         cycle(context, "Тема", PRESETS, MwtkConfig.PRESET, true);
         cycle(context, "Стиль рисовки", STYLES, MwtkConfig.STYLE, false);
         flagCycle(context, "Свой цвет", COLORS, MwtkConfig.CUSTOM_COLOR, 0, COLOR_VALUES);
         flagCycle(context, "Иконка приложения", MwtkIcons.NAMES, MwtkConfig.APP_ICON, 0, null);
         flagCycle(context, "Уведомления в приложении", NOTIFY, MwtkConfig.NOTIFY_STYLE, 1, null);
-        flag(context, "Звуки интерфейса", "Мягкий звук при отправке", MwtkConfig.SOUNDS, true);
         flag(context, "Искры при отправке", "Вспышка у кнопки отправки", MwtkConfig.SEND_SPARKS, true);
         flag(context, "Учитывать «Убрать анимации»", "Если в системе выключены анимации, эффекты замирают", MwtkConfig.RESPECT_ANIMATIONS, true);
         shadow(context);
@@ -95,7 +145,6 @@ public class MwtkSettingsActivity extends BaseFragment {
         flag(context, "Времена года", "Снег зимой, листья осенью, лепестки весной", MwtkConfig.SEASONS, true);
         flagCycle(context, "Эффекты в чате", CHAT_FX_MODES, MwtkConfig.CHAT_FX, 1, null);
         flag(context, "Режим планшета", "Справа 3D-сцена, текст песни на всю правую часть, чаты летают по всему экрану", MwtkConfig.TABLET, true);
-        flag(context, "Фон в такт музыке", "Нужен доступ к микрофону (как для голосовых)", MwtkConfig.MUSIC_PULSE, true);
         flag(context, "Секреты в 3 часа ночи", "Красная луна и глаза в лесу", MwtkConfig.NIGHT, true);
         toggle(context, "Фон следует за наклоном", "Гироскоп двигает надписи и фигуры", MwtkConfig.TILT);
         toggle(context, "Беречь батарею", "Пауза в энергосбережении, ниже 20% и при перегреве", MwtkConfig.BATTERY);
@@ -106,17 +155,9 @@ public class MwtkSettingsActivity extends BaseFragment {
         numSlider(context, "Всё приложение", MwtkConfig.APP_ALPHA, 100, 15, 100, "%");
         shadow(context);
 
-        header(context, "Список чатов");
+        header(context, "Карточки и «в сети»");
         toggle(context, "Объёмные карточки чатов", "Полупрозрачные скруглённые карточки", MwtkConfig.CARDS);
         slider(context, "Скругление карточек", MwtkConfig.RADIUS, 0, 28, " dp");
-        numSlider(context, "Сколько чатов летает", MwtkConfig.FLOAT_COUNT, 16, 5, 40, "");
-        flagCycle(context, "Какие чаты летают", FLOAT_SOURCES, MwtkConfig.FLOAT_SOURCE, 0, null);
-        action(context, "Выбрать летающие чаты", () -> MwtkFloating.showPickDialog(this));
-        TextInfoPrivacyCell floatingInfo = new TextInfoPrivacyCell(context);
-        floatingInfo.setText("Летающие чаты: долгое нажатие на заголовок «MWTKgram» над списком. Бросай кружки пальцем, нажми на кружок — откроется чат, нажми мимо — чаты вернутся.");
-        list.addView(floatingInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
-
-        header(context, "Кто в сети");
         toggle(context, "Свечение аватарки", "Мягкий ореол вокруг", MwtkConfig.GLOW);
         toggle(context, "Полоска на карточке", "Светится у левого края", MwtkConfig.STRIPE);
         toggle(context, "Подсветка карточки", "Карточка светится изнутри", MwtkConfig.CARD_GLOW);
@@ -124,11 +165,20 @@ public class MwtkSettingsActivity extends BaseFragment {
         toggle(context, "Пульсирующая точка", "Медленно «дышит»", MwtkConfig.PULSE);
         toggle(context, "Аватарка-плитка", "Квадрат со скруглёнными углами", MwtkConfig.TILE);
         flag(context, "Пролёт аватарки", "Новое сообщение пролетает над списком", MwtkConfig.FLYBY, true);
-        flag(context, "Голографический профиль", "Перелив и развёртка на фото профиля", MwtkConfig.HOLO, true);
+        flag(context, "Голографический профиль", "Весь профиль — голограмма цвета темы", MwtkConfig.HOLO, true);
         shadow(context);
+    }
 
+    private void buildMusic(Context context) {
         header(context, "Музыка");
         action(context, "Мои плейлисты", () -> MwtkPlaylists.showListBox(this));
+        action(context, "Музыка, «Мой микс» и караоке", () -> presentFragment(new MwtkMusicActivity()));
+        flag(context, "Фон в такт музыке", "Нужен доступ к микрофону (как для голосовых)", MwtkConfig.MUSIC_PULSE, true);
+        flag(context, "Приглашения «Слушать вместе»", "Друг в MWTKgram зовёт слушать — тебя спросят", MwtkConfig.TOGETHER_ALLOW, true);
+        flag(context, "Звуки интерфейса", "Мягкий звук при отправке", MwtkConfig.SOUNDS, true);
+        shadow(context);
+
+        header(context, "Текст песни");
         flag(context, "Летающий текст песни", "Слова вылетают и загораются в такт", MwtkConfig.LYRICS, true);
         flag(context, "Искать текст в интернете", "База LRCLIB", MwtkConfig.LYRICS_ONLINE, true);
         flag(context, "Спрятать чаты, пока играет текст", "Текст на весь экран, нажми — и чаты вернутся", MwtkConfig.HIDE_CHATS, false);
@@ -137,11 +187,22 @@ public class MwtkSettingsActivity extends BaseFragment {
         flagCycle(context, "Стиль текста", TEXT_STYLES, MwtkConfig.LYRICS_STYLE, 0, null);
         flagCycle(context, "Появление", APPEAR, MwtkConfig.LYRICS_APPEAR, 0, null);
         flagCycle(context, "Движение", DRIFT, MwtkConfig.LYRICS_DRIFT, 0, null);
+        flag(context, "Текст дёргается в бит", "Слова подпрыгивают и дрожат под музыку", MwtkConfig.LYRICS_BEAT, true);
         numSlider(context, "Движение слов", MwtkConfig.LYRICS_MOTION, 60, 0, 100, "%");
         numSlider(context, "Размер текста", MwtkConfig.LYRICS_SIZE, 100, 60, 140, "%");
         TextInfoPrivacyCell musicInfo = new TextInfoPrivacyCell(context);
-        musicInfo.setText("Долгое нажатие на трек в чате: «В плейлист MWTK», «Спрятать чаты», «Синхронизировать текст» и «Сдвиг текста».");
+        musicInfo.setText("Долгое нажатие на трек в чате: «В плейлист MWTK», «Спрятать чаты», «Найти текст», «Синхронизировать текст» и «Сдвиг текста». Своя обложка — «⋯» у трека в плейлисте. Слушать вместе — меню чата (⋮).");
         list.addView(musicInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
+
+    private void buildChats(Context context) {
+        header(context, "Летающие чаты");
+        numSlider(context, "Сколько чатов летает", MwtkConfig.FLOAT_COUNT, 16, 5, 40, "");
+        flagCycle(context, "Какие чаты летают", FLOAT_SOURCES, MwtkConfig.FLOAT_SOURCE, 0, null);
+        action(context, "Выбрать летающие чаты", () -> MwtkFloating.showPickDialog(this));
+        TextInfoPrivacyCell floatingInfo = new TextInfoPrivacyCell(context);
+        floatingInfo.setText("Летающие чаты: долгое нажатие на заголовок «MWTKgram» над списком. Бросай кружки пальцем, нажми на кружок — откроется чат, нажми мимо — чаты вернутся.");
+        list.addView(floatingInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         header(context, "Чаты и приватность");
         action(context, MwtkHidden.unlocked() ? "Закрыть скрытые чаты" : "Скрытые чаты", () -> {
@@ -154,9 +215,11 @@ public class MwtkSettingsActivity extends BaseFragment {
         flag(context, "Быстрые фразы через «/»", "Набери «/» в поле сообщения", MwtkConfig.PHRASES, true);
         action(context, "Мои быстрые фразы", () -> MwtkPhrases.edit(this));
         TextInfoPrivacyCell chatInfo = new TextInfoPrivacyCell(context);
-        chatInfo.setText("В меню чата (⋮): «Скрыть чат», «Своё название», «Заметка» и «Удалённые сообщения». У сообщения: «Напомнить».");
+        chatInfo.setText("В меню чата (⋮): «Скрыть чат», «Своё название», «Заметка», «Удалённые сообщения» и «Слушать вместе». У сообщения: «Напомнить». Подарок в архив — зажми его в своём профиле.");
         list.addView(chatInfo, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+    }
 
+    private void buildOther(Context context) {
         header(context, "Синхронизация и темы");
         action(context, "Поделиться темой MWTK", () -> MwtkShare.exportTheme(getParentActivity()));
         action(context, "Отправить настройки на компьютер", () -> MwtkShare.exportSync(getParentActivity()));

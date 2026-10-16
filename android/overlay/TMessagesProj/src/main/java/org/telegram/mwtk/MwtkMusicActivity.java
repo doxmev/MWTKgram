@@ -184,8 +184,23 @@ public class MwtkMusicActivity extends BaseFragment {
         return super.onBackPressed(invoked);
     }
 
+    private int coversVersion = MwtkCovers.version();
+    private final Runnable coversListener = () -> {
+        if (coversVersion != MwtkCovers.version()) {
+            coversVersion = MwtkCovers.version();
+            rebuild();
+        }
+    };
+
+    @Override
+    public boolean onFragmentCreate() {
+        MwtkConfig.addListener(coversListener);
+        return super.onFragmentCreate();
+    }
+
     @Override
     public void onFragmentDestroy() {
+        MwtkConfig.removeListener(coversListener);
         AndroidUtilities.cancelRunOnUIThread(tick);
         if (searchRequest != 0) {
             ConnectionsManager.getInstance(currentAccount).cancelRequest(searchRequest, true);
@@ -212,6 +227,10 @@ public class MwtkMusicActivity extends BaseFragment {
                 TrackRow row = new TrackRow(context);
                 row.bind(message, message.getMusicTitle(), message.getMusicAuthor(), (int) message.getDuration(), "＋");
                 row.setOnClickListener(v -> MwtkPlaylists.playMessages(results, message));
+                row.setOnLongClickListener(v -> {
+                    MwtkCovers.pick(this, message);
+                    return true;
+                });
                 row.action.setOnClickListener(v -> MwtkMusicBot.saveAndAdd(this, message));
                 if ("Мой микс".equals(resultsTitle)) {
                     row.showExtra("👎");
@@ -246,7 +265,31 @@ public class MwtkMusicActivity extends BaseFragment {
         mixBg.setCornerRadius(AndroidUtilities.dp(14));
         mix.setBackground(mixBg);
         mix.setOnClickListener(v -> runMix());
-        content.addView(mix, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 12, 10, 12, 2));
+        TextView karaoke = new TextView(context);
+        karaoke.setText("🎤  Караоке");
+        karaoke.setTextColor(0xffffffff);
+        karaoke.setTextSize(15);
+        karaoke.setTypeface(AndroidUtilities.bold());
+        karaoke.setGravity(Gravity.CENTER);
+        GradientDrawable karaokeBg = new GradientDrawable();
+        karaokeBg.setColor(0x33ffffff);
+        karaokeBg.setCornerRadius(AndroidUtilities.dp(14));
+        karaoke.setBackground(karaokeBg);
+        karaoke.setOnClickListener(v -> MwtkKaraoke.show(this));
+        LinearLayout buttonsRow = new LinearLayout(context);
+        buttonsRow.setOrientation(LinearLayout.HORIZONTAL);
+        buttonsRow.addView(mix, LayoutHelper.createLinear(0, 48, 1f));
+        buttonsRow.addView(karaoke, LayoutHelper.createLinear(0, 48, 1f, 10, 0, 0, 0));
+        content.addView(buttonsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 12, 10, 12, 2));
+        TextView importLink = new TextView(context);
+        importLink.setText("Перенести плейлист по ссылке (Spotify, Яндекс, Deezer)…");
+        importLink.setTextColor(ACCENT);
+        importLink.setTextSize(14);
+        importLink.setPadding(AndroidUtilities.dp(16), AndroidUtilities.dp(12), AndroidUtilities.dp(16), AndroidUtilities.dp(4));
+        importLink.setOnClickListener(v -> MwtkUi.input(this, "Ссылка на плейлист",
+            "Вставь ссылку на открытый плейлист Spotify, Яндекс Музыки или Deezer.",
+            "", "https://…", false, false, null, this::runImport));
+        content.addView(importLink);
         content.addView(label(context, "Плейлисты"));
         int count = MwtkPlaylists.count();
         LinearLayout row = null;
@@ -296,6 +339,11 @@ public class MwtkMusicActivity extends BaseFragment {
     }
 
     private static void setCover(BackupImageView view, MessageObject message, String seed) {
+        android.graphics.Bitmap custom = MwtkCovers.get(message);
+        if (custom != null) {
+            view.setImageBitmap(custom);
+            return;
+        }
         Drawable placeholder = placeholder(seed);
         TLRPC.Document document = message != null ? message.getDocument() : null;
         TLRPC.PhotoSize thumb = document != null ? FileLoader.getClosestPhotoSizeWithSize(document.thumbs, 320) : null;
@@ -458,10 +506,31 @@ public class MwtkMusicActivity extends BaseFragment {
             MessageObject cached = MwtkPlaylists.cached(t.optLong("peer"), t.optLong("msg"));
             row.bind(cached, t.optString("title"), t.optString("performer"), t.optInt("duration"), "⋯");
             row.setOnClickListener(v -> MwtkPlaylists.play(index, trackIndex, false));
-            row.action.setOnClickListener(v -> MwtkUi.confirm(this, "Убрать из плейлиста?", t.optString("title"), "Убрать", () -> {
-                MwtkPlaylists.removeTrack(index, trackIndex);
-                rebuild();
-            }));
+            row.action.setOnClickListener(v -> {
+                MessageObject message = row.boundMessage;
+                boolean custom = message != null && MwtkCovers.has(message);
+                String[] items = custom
+                    ? new String[] { "Своя обложка…", "Убрать свою обложку", "Убрать из плейлиста" }
+                    : new String[] { "Своя обложка…", "Убрать из плейлиста" };
+                org.telegram.ui.ActionBar.AlertDialog.Builder builder = new org.telegram.ui.ActionBar.AlertDialog.Builder(getParentActivity());
+                builder.setTitle(t.optString("title"));
+                builder.setItems(items, (d, which) -> {
+                    String item = items[which];
+                    if (item.startsWith("Своя")) {
+                        if (message == null) {
+                            MwtkUi.toast("Песня ещё загружается, попробуй через секунду");
+                        } else {
+                            MwtkCovers.pick(this, message);
+                        }
+                    } else if (item.startsWith("Убрать свою")) {
+                        MwtkCovers.remove(message);
+                    } else {
+                        MwtkPlaylists.removeTrack(index, trackIndex);
+                        rebuild();
+                    }
+                });
+                showDialog(builder.create());
+            });
             rows.add(row);
             content.addView(row);
         }
@@ -539,6 +608,38 @@ public class MwtkMusicActivity extends BaseFragment {
             }
             showResults("Мой микс", songs);
             MwtkPlaylists.playMessages(results, results.get(0));
+        });
+    }
+
+    private void runImport(String link) {
+        if (link == null || link.trim().isEmpty()) {
+            return;
+        }
+        int generation = ++searchGeneration;
+        MwtkUi.toast("Читаю плейлист…");
+        MwtkImport.fetch(link.trim(), (name, songs, error) -> {
+            if (generation != searchGeneration || getParentActivity() == null) {
+                return;
+            }
+            if (error != null) {
+                MwtkUi.toast(error);
+                return;
+            }
+            MwtkUi.toast("Ищу " + songs.size() + " песен в музыке Telegram…");
+            MwtkImport.findAll(currentAccount, songs, found -> {
+                if (generation != searchGeneration || getParentActivity() == null) {
+                    return;
+                }
+                if (found.isEmpty()) {
+                    MwtkUi.toast("В музыке Telegram ничего из плейлиста не нашлось");
+                    return;
+                }
+                String title = name == null || name.trim().isEmpty() ? "Перенесённый плейлист" : name.trim();
+                showResults(title, found);
+                MwtkUi.confirm(this, "Нашлось " + found.size() + " из " + songs.size(),
+                    "Сохранить плейлист «" + title + "»? Песни лягут в «Избранное» и в новый плейлист.",
+                    "Сохранить", () -> MwtkImport.saveAll(this, found, title));
+            });
         });
     }
 
@@ -790,7 +891,10 @@ public class MwtkMusicActivity extends BaseFragment {
             setMessage(message);
         }
 
+        MessageObject boundMessage;
+
         void setMessage(MessageObject message) {
+            boundMessage = message;
             setCover(cover, message, seed);
             if (message != null && MwtkLyrics.hasCached(message)) {
                 CharSequence text = title.getText();

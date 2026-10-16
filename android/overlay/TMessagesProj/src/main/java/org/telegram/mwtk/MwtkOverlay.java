@@ -58,6 +58,7 @@ public final class MwtkOverlay implements NotificationCenter.NotificationCenterD
         root.addView(flyby, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         lift(flyby, 950);
         MwtkLyrics.attach(root);
+        MwtkTogether.setup();
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             NotificationCenter.getInstance(a).addObserver(this, NotificationCenter.didReceiveNewMessages);
         }

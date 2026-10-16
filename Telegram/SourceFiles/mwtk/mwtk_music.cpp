@@ -9,6 +9,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_common.h"
 #include "api/api_sending.h"
+#include "base/call_delayed.h"
 #include "base/random.h"
 #include "base/unixtime.h"
 #include "data/data_audio_msg_id.h"
@@ -28,6 +29,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
+#include "mwtk/mwtk_covers.h"
 #include "mwtk/mwtk_lyrics.h"
 #include "mwtk/mwtk_playlists.h"
 #include "mwtk/mwtk_taste.h"
@@ -46,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QJsonArray>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QJsonObject>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QUrlQuery>
 #include <QtGui/QLinearGradient>
 #include <QtNetwork/QNetworkAccessManager>
@@ -147,7 +150,15 @@ public:
 			return entry.prepared;
 		}
 		const auto document = SongOf(_session->data().message(id));
-		if (!document || !document->hasThumbnail()) {
+		if (!document) {
+			return QImage();
+		}
+		if (const auto custom = CustomCovers::Get(document); !custom.isNull()) {
+			entry.prepared = Rounded(custom, size, radius);
+			entry.size = size;
+			return entry.prepared;
+		}
+		if (!document->hasThumbnail()) {
 			return QImage();
 		}
 		if (!entry.media) {
@@ -160,6 +171,10 @@ public:
 			return entry.prepared;
 		}
 		return QImage();
+	}
+
+	void clear() {
+		_entries.clear();
 	}
 
 	// The message may not be loaded yet (a playlist from another chat).
@@ -1179,11 +1194,188 @@ void BuildMix(
 	}));
 }
 
+// ------------------------------------------------------------ import
+// A playlist from another service by its link: the songs are then found
+// in the music search of Telegram.
+
+struct ImportedSong {
+	QString artist;
+	QString title;
+};
+
+void GetText(const QString &url, Fn<void(QByteArray)> callback) {
+	static const auto network = new QNetworkAccessManager();
+	auto request = QNetworkRequest(QUrl(url));
+	request.setHeader(
+		QNetworkRequest::UserAgentHeader,
+		u"Mozilla/5.0 (Windows NT 10.0; Win64; x64) MWTKgram"_q);
+	request.setTransferTimeout(15000);
+	const auto reply = network->get(request);
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		callback((reply->error() == QNetworkReply::NoError)
+			? reply->readAll()
+			: QByteArray());
+	});
+}
+
+// Calls done(name, songs, error); error is empty on success.
+void FetchPlaylist(
+		const QString &link,
+		Fn<void(QString, std::vector<ImportedSong>, QString)> done) {
+	const auto text = link.trimmed();
+	static const auto deezer = QRegularExpression(
+		u"deezer\\.com/(?:[a-z]{2}/)?(playlist|album)/(\\d+)"_q);
+	static const auto spotify = QRegularExpression(
+		u"open\\.spotify\\.com/(?:intl-[a-z]+/)?(playlist|album)/([A-Za-z0-9]+)"_q);
+	static const auto yandex = QRegularExpression(
+		u"music\\.yandex\\.[a-z]+/users/([^/]+)/playlists/(\\d+)"_q);
+	if (const auto m = deezer.match(text); m.hasMatch()) {
+		GetText(
+			u"https://api.deezer.com/%1/%2?limit=200"_q.arg(m.captured(1), m.captured(2)),
+			[=](QByteArray data) {
+			const auto root = QJsonDocument::fromJson(data).object();
+			auto songs = std::vector<ImportedSong>();
+			for (const auto &value : root.value(u"tracks"_q).toObject().value(u"data"_q).toArray()) {
+				const auto track = value.toObject();
+				songs.push_back({
+					track.value(u"artist"_q).toObject().value(u"name"_q).toString(),
+					track.value(u"title"_q).toString(),
+				});
+			}
+			const auto error = songs.empty()
+				? Utf("Deezer не отдал плейлист. Он открыт для всех?")
+				: QString();
+			done(root.value(u"title"_q).toString(), std::move(songs), error);
+		});
+		return;
+	}
+	if (const auto m = spotify.match(text); m.hasMatch()) {
+		// Spotify has no open API: its embed page carries the track list.
+		GetText(
+			u"https://open.spotify.com/embed/%1/%2"_q.arg(m.captured(1), m.captured(2)),
+			[=](QByteArray data) {
+			const auto page = QString::fromUtf8(data);
+			auto songs = std::vector<ImportedSong>();
+			static const auto item = QRegularExpression(
+				u"\"title\":\"((?:[^\"\\\\]|\\\\.)*)\",\"subtitle\":\"((?:[^\"\\\\]|\\\\.)*)\""_q);
+			auto it = item.globalMatch(page);
+			while (it.hasNext()) {
+				const auto match = it.next();
+				const auto unescape = [](QString value) {
+					return QJsonDocument::fromJson(
+						(u"[\""_q + value + u"\"]"_q).toUtf8()).array().at(0).toString();
+				};
+				songs.push_back({ unescape(match.captured(2)), unescape(match.captured(1)) });
+			}
+			static const auto name = QRegularExpression(u"\"name\":\"((?:[^\"\\\\]|\\\\.)*)\""_q);
+			const auto title = name.match(page);
+			const auto error = songs.empty()
+				? Utf("Spotify не показал песни. Плейлист открыт для всех?")
+				: QString();
+			done(
+				title.hasMatch() ? title.captured(1) : Utf("Из Spotify"),
+				std::move(songs),
+				error);
+		});
+		return;
+	}
+	if (const auto m = yandex.match(text); m.hasMatch()) {
+		GetText(
+			u"https://music.yandex.ru/handlers/playlist.jsx?owner=%1&kinds=%2"_q.arg(
+				m.captured(1),
+				m.captured(2)),
+			[=](QByteArray data) {
+			const auto playlist = QJsonDocument::fromJson(data).object().value(
+				u"playlist"_q).toObject();
+			auto songs = std::vector<ImportedSong>();
+			for (const auto &value : playlist.value(u"tracks"_q).toArray()) {
+				const auto track = value.toObject();
+				songs.push_back({
+					track.value(u"artists"_q).toArray().at(0).toObject().value(u"name"_q).toString(),
+					track.value(u"title"_q).toString(),
+				});
+			}
+			const auto error = songs.empty()
+				? Utf("Яндекс Музыка не отдала плейлист (бывает капча или закрытый плейлист).")
+				: QString();
+			done(playlist.value(u"title"_q).toString(), std::move(songs), error);
+		});
+		return;
+	}
+	done(QString(), {}, Utf("Поддерживаются ссылки на плейлисты Deezer, Spotify и Яндекс Музыки "
+		"(вида music.yandex.ru/users/…/playlists/…)."));
+}
+
+// Songs from the bot are not real messages: each one is sent to
+// «Избранное» and the saved message goes to the new playlist.
+void SaveAllToPlaylist(
+		not_null<Window::SessionController*> controller,
+		std::vector<FullMsgId> ids,
+		QString name) {
+	const auto session = &controller->session();
+	const auto index = Playlists::Create(session, name);
+	const auto history = session->data().history(session->user());
+	struct Pending {
+		std::vector<DocumentData*> documents;
+		int left = 0;
+		rpl::lifetime lifetime;
+	};
+	const auto pending = std::make_shared<Pending>();
+	for (const auto &id : ids) {
+		const auto item = session->data().message(id);
+		const auto document = SongOf(item);
+		if (!document) {
+			continue;
+		}
+		if (item->isRegular()) {
+			Playlists::AddTrack(session, index, item);
+		} else {
+			pending->documents.push_back(document);
+		}
+	}
+	pending->left = int(pending->documents.size());
+	if (!pending->left) {
+		controller->showToast(Utf("Плейлист «") + name + Utf("» готов."));
+		return;
+	}
+	session->data().itemIdChanged(
+	) | rpl::on_next([=](Data::Session::IdChange change) {
+		const auto item = session->data().message(change.newId);
+		const auto document = SongOf(item);
+		if (!item || item->history() != history || !document) {
+			return;
+		}
+		const auto i = ranges::find(pending->documents, document);
+		if (i == end(pending->documents)) {
+			return;
+		}
+		pending->documents.erase(i);
+		Playlists::AddTrack(session, index, item);
+		if (--pending->left == 0) {
+			pending->lifetime.destroy();
+		}
+	}, pending->lifetime);
+	// Not all at once: Telegram does not like dozens of messages a second.
+	auto delay = crl::time(0);
+	for (const auto document : std::vector<DocumentData*>(pending->documents)) {
+		base::call_delayed(delay, session, [=] {
+			Api::SendExistingDocument(
+				Api::MessageToSend(Api::SendAction(history)),
+				document);
+		});
+		delay += 450;
+	}
+	controller->showToast(Utf("Сохраняю песни в «Избранное» и собираю плейлист «")
+		+ name + Utf("»…"));
+}
+
 enum class ViewKind {
 	Home,
 	Playlist,
 	Search,
 	Mix,
+	Import,
 };
 
 struct Navigation {
@@ -1194,6 +1386,7 @@ struct Navigation {
 	Fn<void(int)> playlist;
 	Fn<void(QString)> search;
 	Fn<void()> mix;
+	Fn<void(QString)> import;
 	Fn<void()> refresh;
 };
 
@@ -1247,19 +1440,47 @@ void Show(not_null<Window::SessionController*> controller) {
 			nav->index = -1;
 			*title = Utf("Музыка");
 			content->clear();
-			const auto mixButton = content->add(
-				object_ptr<Ui::RoundButton>(
-					content,
-					rpl::single(Utf("▶  Мой микс")),
-					st::defaultActiveButton),
+			// «Мой микс» and «Караоке» side by side in one row.
+			auto rowOwner = object_ptr<Ui::RpWidget>(content);
+			const auto row = rowOwner.data();
+			const auto mixButton = Ui::CreateChild<Ui::RoundButton>(
+				row,
+				rpl::single(Utf("▶  Мой микс")),
+				st::defaultActiveButton);
+			const auto karaokeButton = Ui::CreateChild<Ui::RoundButton>(
+				row,
+				rpl::single(Utf("🎤  Караоке")),
+				st::defaultLightButton);
+			row->resize(Px(320), mixButton->height());
+			mixButton->moveToLeft(0, 0);
+			karaokeButton->moveToLeft(mixButton->width() + Px(10), 0);
+			content->add(
+				std::move(rowOwner),
 				style::margins(
 					st::boxRowPadding.left(),
 					Px(8),
 					st::boxRowPadding.right(),
-					Px(2)),
-				style::al_left);
+					Px(2)));
 			mixButton->setClickedCallback([=] {
 				crl::on_main(box, [=] { nav->mix(); });
+			});
+			karaokeButton->setClickedCallback([=] {
+				box->closeBox();
+				Lyrics::ShowKaraoke(controller);
+			});
+			const auto importLink = content->add(
+				object_ptr<Ui::LinkButton>(
+					content,
+					Utf("Перенести плейлист по ссылке (Spotify, Яндекс, Deezer)…")),
+				style::margins(
+					st::boxRowPadding.left(),
+					Px(8),
+					st::boxRowPadding.right(),
+					Px(2)));
+			importLink->setClickedCallback([=] {
+				AskName(controller, Utf("Ссылка на плейлист"), QString(), [=](QString link) {
+					crl::on_main(box, [=] { nav->import(link); });
+				});
 			});
 			addLabel(Utf("ПЛЕЙЛИСТЫ"));
 			content->add(
@@ -1352,6 +1573,16 @@ void Show(not_null<Window::SessionController*> controller) {
 					crl::on_main(box, [=] {
 						Playlists::RemoveTrack(session, index, i);
 					});
+				});
+				const auto coverButton = row->addExtraAction(Utf("🖼"));
+				const auto trackId = TrackId(track);
+				coverButton->setClickedCallback([=] {
+					const auto document = SongOf(session->data().message(trackId));
+					if (document) {
+						CustomCovers::Pick(controller, document);
+					} else {
+						controller->showToast(Utf("Песня ещё загружается, попробуй через секунду."));
+					}
 				});
 			}
 			box->clearButtons();
@@ -1484,6 +1715,83 @@ void Show(not_null<Window::SessionController*> controller) {
 			}));
 		};
 
+		nav->import = [=](QString link) {
+			nav->kind = ViewKind::Import;
+			const auto generation = ++nav->generation;
+			*title = Utf("Перенос плейлиста");
+			content->clear();
+			const auto status = addStatus(Utf("Читаю плейлист…"));
+			setBackButtons();
+			const auto alive = [=] {
+				return (nav->generation == generation)
+					&& (nav->kind == ViewKind::Import);
+			};
+			FetchPlaylist(link, crl::guard(box, [=](
+					QString name,
+					std::vector<ImportedSong> songs,
+					QString error) {
+				if (!alive()) {
+					return;
+				}
+				if (!error.isEmpty()) {
+					status->setText(error);
+					return;
+				}
+				if (songs.size() > 80) {
+					songs.resize(80);
+				}
+				const auto total = int(songs.size());
+				status->setText(Utf("Ищу %1 песен в музыке Telegram…").arg(total));
+				struct Found {
+					std::vector<FullMsgId> ids;
+					std::vector<int> order;
+					int left = 0;
+				};
+				const auto found = std::make_shared<Found>();
+				found->left = total;
+				found->ids.resize(total);
+				for (auto i = 0; i != total; ++i) {
+					const auto query = songs[i].artist + ' ' + songs[i].title;
+					SearchBot(session, query, crl::guard(box, [=](std::vector<FullMsgId> ids) {
+						if (!ids.empty()) {
+							found->ids[i] = ids.front();
+						}
+						if (--found->left > 0 || !alive()) {
+							return;
+						}
+						auto list = std::vector<FullMsgId>();
+						for (const auto &id : found->ids) {
+							if (id) {
+								list.push_back(id);
+							}
+						}
+						const auto playlistName = name.trimmed().isEmpty()
+							? Utf("Перенесённый плейлист")
+							: name.trimmed();
+						status->setText(Utf("«%1»: нашлось %2 из %3. Нажми на песню — заиграет, "
+							"«Сохранить плейлист» — песни лягут в «Избранное» и в новый плейлист.")
+							.arg(playlistName)
+							.arg(list.size())
+							.arg(total));
+						addFoundRows(list, false);
+						box->clearButtons();
+						box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
+							crl::on_main(box, [=] { nav->home(); });
+						});
+						if (!list.empty()) {
+							box->addButton(rpl::single(Utf("Сохранить плейлист")), [=] {
+								SaveAllToPlaylist(controller, list, playlistName);
+								crl::on_main(box, [=] { nav->home(); });
+							});
+							box->addButton(rpl::single(Utf("Слушать")), [=] {
+								Playlists::PlayQueue(session, list, 0);
+							});
+						}
+					}));
+				}
+			}));
+		};
+
 		nav->mix = [=] {
 			nav->kind = ViewKind::Mix;
 			const auto generation = ++nav->generation;
@@ -1527,6 +1835,17 @@ void Show(not_null<Window::SessionController*> controller) {
 		Playlists::Changes(
 		) | rpl::on_next([=] {
 			crl::on_main(box, [=] { nav->refresh(); });
+		}, box->lifetime());
+		CustomCovers::Changes(
+		) | rpl::on_next([=] {
+			state->covers.clear();
+			crl::on_main(box, [=] {
+				if (nav->kind == ViewKind::Home || nav->kind == ViewKind::Playlist) {
+					nav->refresh();
+				} else {
+					box->update();
+				}
+			});
 		}, box->lifetime());
 
 		field->submits(

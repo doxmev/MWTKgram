@@ -63,6 +63,9 @@ void ShowSearchBox(not_null<Window::SessionController*> controller);
 // glows and follows the music, a click on a line seeks there.
 void ShowLyricsList(not_null<Window::SessionController*> controller);
 
+// Караоке on the whole window for the song that plays now.
+void ShowKaraoke(not_null<Window::SessionController*> controller);
+
 // Song context menu: hide chats, timing shift and the sync editor.
 void FillSongMenu(
 	not_null<Ui::PopupMenu*> menu,

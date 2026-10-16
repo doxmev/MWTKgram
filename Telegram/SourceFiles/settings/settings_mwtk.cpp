@@ -329,6 +329,91 @@ void AddSegmented(
 	}, picker->lifetime());
 }
 
+// Tabs of the MWTK settings: «Вид», «Музыка», «Чаты», «Ещё».
+[[nodiscard]] rpl::variable<int> &CurrentTab() {
+	static auto result = rpl::variable<int>(0);
+	return result;
+}
+
+void AddTabs(
+		not_null<Ui::VerticalLayout*> container,
+		std::vector<QString> labels) {
+	const auto count = int(labels.size());
+	const auto height = int(st::settingsButton.height * 1.15);
+	const auto picker = container->add(
+		object_ptr<Ui::RpWidget>(container),
+		st::boxRowPadding);
+	picker->resize(picker->width(), height);
+	picker->setCursor(style::cur_pointer);
+	const auto segment = [=](int index) {
+		const auto width = picker->width() / std::max(count, 1);
+		return QRect(index * width, 0, width, height);
+	};
+	picker->paintRequest(
+	) | rpl::on_next([=] {
+		auto p = QPainter(picker);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto radius = height / 3.;
+		p.setPen(Qt::NoPen);
+		p.setBrush(st::windowBgOver);
+		p.drawRoundedRect(picker->rect(), radius, radius);
+		const auto selected = CurrentTab().current();
+		const auto palette = ::Mwtk::PaletteAt(
+			base::options::value<int>(::Mwtk::kOptionPalette),
+			0.);
+		p.setFont(st::semiboldFont);
+		for (auto i = 0; i != count; ++i) {
+			const auto rect = segment(i);
+			if (i == selected) {
+				auto gradient = QLinearGradient(rect.topLeft(), rect.topRight());
+				gradient.setColorAt(0., palette.first);
+				gradient.setColorAt(1., palette.third);
+				p.setPen(Qt::NoPen);
+				p.setBrush(gradient);
+				p.drawRoundedRect(
+					QRectF(rect).marginsRemoved({ 3., 3., 3., 3. }),
+					radius,
+					radius);
+				p.setPen(palette.first.lightnessF() > 0.7f
+					? QColor(0, 0, 0)
+					: QColor(255, 255, 255));
+			} else {
+				p.setPen(st::windowFg);
+			}
+			p.drawText(rect, Qt::AlignCenter, labels[i]);
+		}
+	}, picker->lifetime());
+	CurrentTab().changes(
+	) | rpl::on_next([=] {
+		picker->update();
+	}, picker->lifetime());
+	picker->events(
+	) | rpl::filter([](not_null<QEvent*> e) {
+		return e->type() == QEvent::MouseButtonPress;
+	}) | rpl::on_next([=](not_null<QEvent*> e) {
+		const auto position = static_cast<QMouseEvent*>(e.get())->pos();
+		for (auto i = 0; i != count; ++i) {
+			if (segment(i).contains(position)) {
+				CurrentTab() = i;
+				break;
+			}
+		}
+	}, picker->lifetime());
+}
+
+// A page of the tabs: shown only while its tab is selected.
+[[nodiscard]] not_null<Ui::VerticalLayout*> AddTabPage(
+		not_null<Ui::VerticalLayout*> container,
+		int index) {
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	wrap->toggleOn(CurrentTab().value(
+	) | rpl::map(rpl::mappers::_1 == index), anim::type::instant);
+	return wrap->entity();
+}
+
 void AddPresetRow(not_null<Ui::VerticalLayout*> container) {
 	const auto count = ::Mwtk::kPresetCount;
 	const auto height = st::settingsButton.height;
@@ -663,15 +748,24 @@ rpl::producer<QString> MwtkSettings::title() {
 }
 
 void MwtkSettings::setupContent() {
-	const auto content = Ui::CreateChild<Ui::VerticalLayout>(this);
+	const auto root = Ui::CreateChild<Ui::VerticalLayout>(this);
 	const auto window = controller();
 
-	Ui::AddSkip(content);
-	AddPreview(content);
-	Ui::AddSkip(content);
+	Ui::AddSkip(root);
+	AddPreview(root);
+	Ui::AddSkip(root);
 
-	AddOptionToggle(window, content, Utf("Все эффекты MWTKgram (F9)"), ::Mwtk::kOptionEffects);
-	Ui::AddSkip(content);
+	AddOptionToggle(window, root, Utf("Все эффекты MWTKgram (F9)"), ::Mwtk::kOptionEffects);
+	Ui::AddSkip(root);
+	AddTabs(root, { Utf("Вид"), Utf("Музыка"), Utf("Чаты"), Utf("Ещё") });
+	Ui::AddSkip(root);
+	const auto designPage = AddTabPage(root, 0);
+	const auto musicPage = AddTabPage(root, 1);
+	const auto chatsPage = AddTabPage(root, 2);
+	const auto otherPage = AddTabPage(root, 3);
+
+	// «Вид»: everything about how the client looks.
+	auto content = designPage;
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Пресеты в один клик")));
 	AddPresetRow(content);
 	Ui::AddSkip(content);
@@ -723,7 +817,6 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("3D-объекты"), ::Mwtk::kOptionObjects);
 	AddOptionToggle(window, content, Utf("Светящиеся частицы"), ::Mwtk::kOptionParticles);
 	AddOptionToggle(window, content, Utf("Времена года: снег, листья, гирлянда"), ::Mwtk::kOptionSeasons);
-	AddOptionToggle(window, content, Utf("Фон в такт музыке"), ::Mwtk::kOptionMusicPulse);
 	Ui::AddSkip(content);
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
@@ -822,10 +915,17 @@ void MwtkSettings::setupContent() {
 			"Своё фото или видео копируется в папку клиента, исходник можно удалить."))));
 	Ui::AddSkip(content);
 
+	// «Музыка»: player, lyrics, mix, karaoke, listening together.
+	content = musicPage;
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Музыка")));
-	AddActionButton(content, Utf("Мои плейлисты"), [=] {
+	AddActionButton(content, Utf("Мои плейлисты и «Мой микс»"), [=] {
 		::Mwtk::Music::Show(window);
 	});
+	AddOptionToggle(window, content, Utf("Фон в такт музыке"), ::Mwtk::kOptionMusicPulse);
+	AddOptionToggle(window, content, Utf("Приглашения «Слушать вместе»"), ::Mwtk::kOptionTogetherAllow);
+	AddOptionToggle(window, content, Utf("Не включать следующий трек сам"), Media::Player::kOptionDisableAutoplayNext);
+	Ui::AddSkip(content);
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Текст песни")));
 	AddOptionToggle(window, content, Utf("Летающий текст песни"), ::Mwtk::kOptionLyrics);
 	AddOptionToggle(window, content, Utf("Искать текст в интернете (LRCLIB)"), ::Mwtk::kOptionLyricsOnline);
 	AddOptionToggle(window, content, Utf("Спрятать чаты, пока играет текст"), ::Mwtk::kOptionHideChats);
@@ -868,6 +968,7 @@ void MwtkSettings::setupContent() {
 		::Mwtk::Lyrics::DriftName(3),
 	});
 	Ui::AddSkip(content);
+	AddOptionToggle(window, content, Utf("Текст дёргается в бит"), ::Mwtk::kOptionLyricsBeat);
 	AddSlider(content, Utf("Движение слов"), ::Mwtk::kOptionLyricsMotion, 0, 100, Utf("%"));
 	AddSlider(content, Utf("Размер текста"), ::Mwtk::kOptionLyricsSize, 60, 140, Utf("%"));
 	Ui::AddSkip(content);
@@ -876,9 +977,11 @@ void MwtkSettings::setupContent() {
 		rpl::producer<QString>(rpl::single(Utf("Добавить трек: правый клик по музыке в чате → «В плейлист MWTK…». "
 			"Плейлист играет треки по порядку или вперемешку, кнопки «вперёд/назад» в плеере идут по нему.\n\n"
 			"Текст песни берётся из .lrc рядом с файлом или из базы LRCLIB. Если текста нет или он отстаёт — "
-			"правый клик по треку → «Синхронизировать текст…» или «Сдвиг текста песни…»."))));
+			"правый клик по треку → «Синхронизировать текст…» или «Сдвиг текста песни…».\n\n"
+		"Своя обложка и караоке — правый клик по треку в чате. Слушать вместе — меню чата (⋯)."))));
 	Ui::AddSkip(content);
 
+	content = designPage;
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("3D-сообщения и чаты")));
 	AddOptionToggle(window, content, Utf("Объёмные сообщения"), ::Mwtk::kOptionBubbles3d);
 	AddOptionToggle(window, content, Utf("Сообщения в цвет темы"), ::Mwtk::kOptionBubblesTint);
@@ -930,13 +1033,26 @@ void MwtkSettings::setupContent() {
 	Ui::AddDivider(content);
 	Ui::AddSkip(content);
 
-	Ui::AddSubsectionTitle(content, rpl::single(Utf("Полезные функции")));
+	// «Ещё»: updates, sync, hotkeys and small switches.
+	content = otherPage;
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Обновления и синхронизация")));
 	AddActionButton(
 		content,
 		Utf("Проверить обновления (сборка ")
 			+ QString::number(::Mwtk::Updater::CurrentBuild())
 			+ ')',
 		[=] { ::Mwtk::Updater::CheckNow(); });
+	AddActionButton(content, Utf("Поделиться темой MWTK (файл)"), [=] {
+		::Mwtk::Share::ExportTheme(window);
+	});
+	AddActionButton(content, Utf("Синхронизировать с телефоном (в «Избранное»)"), [=] {
+		::Mwtk::Share::SendSync(window);
+	});
+	Ui::AddSkip(content);
+
+	// «Чаты»: floating, hidden, deleted messages, phrases.
+	content = chatsPage;
+	Ui::AddSubsectionTitle(content, rpl::single(Utf("Чаты")));
 	AddActionButton(content, Utf("Летающие чаты (F8)"), [=] {
 		::Mwtk::Floating::Toggle(window);
 	});
@@ -962,13 +1078,9 @@ void MwtkSettings::setupContent() {
 	AddActionButton(content, Utf("Мои быстрые фразы"), [=] {
 		::Mwtk::Phrases::ShowEditBox(window);
 	});
-	AddActionButton(content, Utf("Поделиться темой MWTK (файл)"), [=] {
-		::Mwtk::Share::ExportTheme(window);
-	});
-	AddActionButton(content, Utf("Синхронизировать с телефоном (в «Избранное»)"), [=] {
-		::Mwtk::Share::SendSync(window);
-	});
 	Ui::AddSkip(content);
+
+	content = otherPage;
 	Ui::AddSubsectionTitle(content, rpl::single(Utf("Горячие клавиши")));
 	for (auto i = 0; i != int(::Mwtk::Hotkeys::Action::Count); ++i) {
 		const auto action = ::Mwtk::Hotkeys::Action(i);
@@ -1007,7 +1119,6 @@ void MwtkSettings::setupContent() {
 	AddOptionToggle(window, content, Utf("Непрочитанные чаты сверху"), Dialogs::kOptionDialogsUnreadOnTop);
 	AddOptionToggle(window, content, Utf("Безлимит недавних стикеров"), ChatHelpers::kOptionUnlimitedRecentStickers);
 	AddOptionToggle(window, content, Utf("Сообщения на всю ширину"), HistoryView::kOptionUnlimitedMessageWidth);
-	AddOptionToggle(window, content, Utf("Не включать следующий трек сам"), Media::Player::kOptionDisableAutoplayNext);
 	AddOptionToggle(window, content, Utf("Скрыть кнопку ИИ"), Ui::kOptionHideAiButton);
 	Ui::AddSkip(content);
 	Ui::AddDividerText(
@@ -1017,7 +1128,7 @@ void MwtkSettings::setupContent() {
 			"в меню чата и сообщения (правый клик). F9 — эффекты, F8 — летающие чаты, "
 			"Ctrl+Shift+L — скрытые чаты."))));
 
-	Ui::ResizeFitChild(this, content);
+	Ui::ResizeFitChild(this, root);
 }
 
 } // namespace Settings

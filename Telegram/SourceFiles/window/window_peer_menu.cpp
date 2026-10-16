@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mwtk/mwtk_hidden.h"
 #include "mwtk/mwtk_names.h"
 #include "mwtk/mwtk_notes.h"
+#include "mwtk/mwtk_together.h"
 
 #include "base/call_delayed.h"
 #include "menu/menu_check_item.h"
@@ -345,6 +346,7 @@ private:
 	void addMwtkRename();
 	void addMwtkHide();
 	void addMwtkDeleted();
+	void addMwtkTogether();
 	void addBotToGroup();
 	void addNewMembers();
 	void addDeleteContact();
@@ -1228,6 +1230,26 @@ void Filler::addMwtkDeleted() {
 		&st::menuIconDelete);
 }
 
+void Filler::addMwtkTogether() {
+	const auto user = (_topic || _sublist || !_peer) ? nullptr : _peer->asUser();
+	if (!user || user->isSelf() || user->isBot()) {
+		return;
+	}
+	const auto controller = _controller;
+	const auto peer = _peer;
+	if (Mwtk::Together::ActiveWith(peer)) {
+		_addAction(
+			QString::fromUtf8("Закончить слушать вместе"),
+			[] { Mwtk::Together::End(); },
+			&st::menuIconLeave);
+	} else {
+		_addAction(
+			QString::fromUtf8("Слушать музыку вместе (MWTK)"),
+			[=] { Mwtk::Together::Invite(controller, peer); },
+			&st::menuIconSoundOn);
+	}
+}
+
 void Filler::addBotToGroup() {
 	const auto user = _peer->asUser();
 	if (!user) {
@@ -2007,6 +2029,7 @@ void Filler::fillHistoryActions() {
 	addMwtkRename();
 	addMwtkHide();
 	addMwtkDeleted();
+	addMwtkTogether();
 	addViewAsTopics();
 	addManageChat();
 	addStoryArchive();

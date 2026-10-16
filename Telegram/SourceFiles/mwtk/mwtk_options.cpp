@@ -469,6 +469,27 @@ base::options::option<QString> OptionFloatPicked({
 	.defaultValue = QString(),
 });
 
+base::options::toggle OptionLyricsBeat({
+	.id = kOptionLyricsBeat,
+	.name = "MWTKgram lyrics beat pulse",
+	.description = "Text and the cover pulse with the beat.",
+	.defaultValue = true,
+});
+
+base::options::option<QString> OptionGiftsArchived({
+	.id = kOptionGiftsArchived,
+	.name = "MWTKgram archived gifts",
+	.description = "Gift keys hidden from your own profile, comma separated.",
+	.defaultValue = QString(),
+});
+
+base::options::toggle OptionTogetherAllow({
+	.id = kOptionTogetherAllow,
+	.name = "MWTKgram listen together invites",
+	.description = "Show invitations to listen to music together.",
+	.defaultValue = true,
+});
+
 base::options::toggle OptionHideChats({
 	.id = kOptionHideChats,
 	.name = "MWTKgram hide chats for lyrics",
@@ -585,6 +606,9 @@ const char kOptionFloatCount[] = "mwtk-float-count";
 const char kOptionFloatSource[] = "mwtk-float-source";
 const char kOptionFloatPicked[] = "mwtk-float-picked";
 const char kOptionHideChats[] = "mwtk-hide-chats";
+const char kOptionLyricsBeat[] = "mwtk-lyrics-beat";
+const char kOptionGiftsArchived[] = "mwtk-gifts-archived";
+const char kOptionTogetherAllow[] = "mwtk-together-allow";
 const char kOptionMusicPulse[] = "mwtk-music-pulse";
 const char kOptionSeasons[] = "mwtk-seasons";
 const char kOptionFlyby[] = "mwtk-flyby";
@@ -1030,6 +1054,9 @@ std::vector<const char*> AllOptionIds() {
 		kOptionFloatSource,
 		kOptionFloatPicked,
 		kOptionHideChats,
+		kOptionLyricsBeat,
+		kOptionGiftsArchived,
+		kOptionTogetherAllow,
 		kOptionMusicPulse,
 		kOptionSeasons,
 		kOptionFlyby,

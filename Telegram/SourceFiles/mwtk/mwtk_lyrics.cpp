@@ -18,6 +18,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/image/image.h"
 #include "media/audio/media_audio.h"
 #include "media/player/media_player_instance.h"
+#include "mainwindow.h"
+#include "window/main_window.h"
+#include "mwtk/mwtk_covers.h"
 #include "mwtk/mwtk_options.h"
 #include "mwtk/mwtk_room.h"
 #include "settings.h"
@@ -45,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QRegularExpression>
 #include <QtCore/QSaveFile>
 #include <QtCore/QUrlQuery>
+#include <QtGui/QBrush>
 #include <QtGui/QFontDatabase>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QPainter>
@@ -575,7 +579,9 @@ private:
 	[[nodiscard]] crl::time position() const;
 	[[nodiscard]] bool hideMode() const;
 	void ensureLayouts(crl::time now);
-	[[nodiscard]] LineLayout layoutLine(int index) const;
+	[[nodiscard]] LineLayout layoutLine(
+		int index,
+		const std::vector<QRectF> &avoid) const;
 	void shatter(const Word &word, QPointF at);
 	void paintWord(QPainter &p, const Word &word, crl::time now);
 
@@ -600,6 +606,8 @@ private:
 	float64 _coverBeat = 0.;
 	QRegion _painted; // what the last frame drew, repainted next frame
 	float64 _beat = 0.; // 0..1, a kick in the music
+	std::vector<std::pair<crl::time, float64>> _waves; // glow waves: born, strength
+	crl::time _lastWave = 0;
 	float64 _levelAverage = 0.;
 	std::vector<QPointer<QWidget>> _hiddenWidgets; // "hide chats" really hides
 	void applyHideChats(bool hide);
@@ -634,6 +642,12 @@ LyricsWidget::LyricsWidget(QWidget *parent)
 		Current().changes.events()
 	) | rpl::on_next([=] {
 		refresh();
+	}, lifetime());
+
+	CustomCovers::Changes(
+	) | rpl::on_next([=] {
+		resetCover();
+		update();
 	}, lifetime());
 
 	::Media::Player::instance()->updatedNotifier(
@@ -817,7 +831,9 @@ void LyricsWidget::tick() {
 	}
 }
 
-LineLayout LyricsWidget::layoutLine(int index) const {
+LineLayout LyricsWidget::layoutLine(
+		int index,
+		const std::vector<QRectF> &avoid) const {
 	const auto &state = Current();
 	const auto &line = state.lines[index];
 	const auto scale = style::Scale() / 100.;
@@ -1020,6 +1036,53 @@ LineLayout LyricsWidget::layoutLine(int index) const {
 		} else if (bounds.bottom() > area.bottom()) {
 			shift.setY(area.bottom() - bounds.bottom());
 		}
+
+		// Do not land on the words of a line that is still on screen:
+		// try moving up or down (and sideways) to the nearest free place.
+		const auto placed = bounds.translated(shift);
+		const auto overlapOf = [&](const QRectF &rect) {
+			auto total = 0.;
+			for (const auto &other : avoid) {
+				const auto common = rect.intersected(other);
+				if (!common.isEmpty()) {
+					total += common.width() * common.height();
+				}
+			}
+			return total;
+		};
+		if (overlapOf(placed) > 0.) {
+			const auto gap = base * 0.4;
+			auto candidates = std::vector<QPointF>();
+			for (const auto &other : avoid) {
+				candidates.emplace_back(0., other.top() - gap - placed.bottom());
+				candidates.emplace_back(0., other.bottom() + gap - placed.top());
+				candidates.emplace_back(other.left() - gap - placed.right(), 0.);
+				candidates.emplace_back(other.right() + gap - placed.left(), 0.);
+			}
+			auto best = QPointF();
+			auto bestOverlap = overlapOf(placed);
+			auto bestDistance = 0.;
+			for (const auto &candidate : candidates) {
+				const auto moved = placed.translated(candidate);
+				if (moved.top() < area.top() - 1.
+					|| moved.bottom() > area.bottom() + 1.
+					|| moved.left() < area.left() - 1.
+					|| moved.right() > area.right() + 1.) {
+					continue;
+				}
+				const auto overlap = overlapOf(moved);
+				const auto distance = std::abs(candidate.x())
+					+ std::abs(candidate.y());
+				if (overlap < bestOverlap - 1.
+					|| (std::abs(overlap - bestOverlap) <= 1.
+						&& distance < bestDistance)) {
+					best = candidate;
+					bestOverlap = overlap;
+					bestDistance = distance;
+				}
+			}
+			shift += best;
+		}
 		for (auto &word : result.words) {
 			word.position += shift;
 		}
@@ -1083,7 +1146,23 @@ void LyricsWidget::ensureLayouts(crl::time now) {
 			_layouts.end(),
 			[&](const LineLayout &layout) { return layout.index == i; });
 		if (visible && existing == _layouts.end()) {
-			_layouts.push_back(layoutLine(i));
+			// Words of the lines still on screen: the new line keeps away.
+			auto avoid = std::vector<QRectF>();
+			for (const auto &layout : _layouts) {
+				for (const auto &word : layout.words) {
+					if (word.gone
+						|| word.dim.isNull()
+						|| now >= word.out + kVanish) {
+						continue;
+					}
+					const auto size = QSizeF(word.dim.size())
+						/ word.dim.devicePixelRatio();
+					avoid.push_back(QRectF(
+						word.position - QPointF(size.width(), size.height()) / 2.,
+						size));
+				}
+			}
+			_layouts.push_back(layoutLine(i, avoid));
 		} else if (!visible && existing != _layouts.end()) {
 			_layouts.erase(existing);
 		}
@@ -1135,6 +1214,8 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 	const auto ease = 1. - std::pow(1. - k, 3.);
 	const auto onScreen = std::max((now - word.start) / 1000., 0.);
 	const auto drift = std::clamp(OptionInt(kOptionLyricsDrift), 0, 3);
+	// «Текст дёргается в бит» off: the words stay calm, the cover still pulses.
+	const auto beat = OptionValue(kOptionLyricsBeat) ? _beat : 0.;
 	auto offset = QPointF();
 	switch (drift) {
 	case 1: // Wave: the line rolls like a wave from left to right.
@@ -1149,8 +1230,8 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 	} break;
 	case 3: // Shake on the beat.
 		offset = QPointF(
-			std::sin(seconds * 37. + word.phase * 5.) * 9. * _beat,
-			std::cos(seconds * 41. + word.phase * 3.) * 7. * _beat)
+			std::sin(seconds * 37. + word.phase * 5.) * 9. * beat,
+			std::cos(seconds * 41. + word.phase * 3.) * 7. * beat)
 			+ QPointF(
 				std::sin(seconds * 0.9 + word.phase) * 3. * motion,
 				std::cos(seconds * 1.1 + word.phase) * 3. * motion);
@@ -1166,7 +1247,7 @@ void LyricsWidget::paintWord(QPainter &p, const Word &word, crl::time now) {
 	auto position = word.position + word.from * (1. - ease) + offset;
 	auto opacity = ease;
 	const auto singing = (now >= word.start && now < word.out);
-	auto scale = (0.3 + 0.7 * ease) * (1. + (singing ? 0.14 : 0.06) * _beat);
+	auto scale = (0.3 + 0.7 * ease) * (1. + (singing ? 0.14 : 0.06) * beat);
 	if (now >= word.out) {
 		const auto v = std::clamp((now - word.out) / double(kVanish), 0., 1.);
 		opacity *= 1. - v;
@@ -1352,8 +1433,11 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 	if (!_document) {
 		return;
 	}
-	// Load the cover (the song thumbnail) once.
-	if (!_coverMedia && _document->hasThumbnail()) {
+	// Your own cover first, then the song thumbnail.
+	if (_cover.isNull()) {
+		_cover = CustomCovers::Get(_document);
+	}
+	if (_cover.isNull() && !_coverMedia && _document->hasThumbnail()) {
 		_coverMedia = _document->createMediaView();
 		_coverMedia->thumbnailWanted(Data::FileOrigin(_contextId));
 	}
@@ -1419,26 +1503,65 @@ void LyricsWidget::paintCover(QPainter &p, crl::time now) {
 		const auto grow = half * 0.05 * i;
 		p.drawRoundedRect(box.adjusted(-grow, -grow, grow, grow), radius + grow, radius + grow);
 	}
-	// A ring of bars that jump with the music.
+	// Glow waves that leave the edges of the cover on every beat and roll
+	// around it: a bright arc runs along each wave.
 	{
-		constexpr auto kBars = 48;
-		constexpr auto kPi = 3.14159265358979323846;
-		const auto inner = half * 1.48;
-		const auto longest = half * 0.42;
-		auto bar = accent.lighter(130);
-		p.setBrush(Qt::NoBrush);
-		for (auto i = 0; i != kBars; ++i) {
-			const auto a = i * 2. * kPi / kBars;
-			const auto wobble = 0.5 + 0.5 * std::sin(t * (5. + (i % 7)) + i * 1.9);
-			const auto value = std::clamp(
-				0.08 + level * (0.35 + 0.65 * wobble) + _beat * 0.45 * wobble,
-				0.,
-				1.);
-			bar.setAlpha(int(110 + 120 * value));
-			p.setPen(QPen(bar, std::max(half * 0.035, 2.), Qt::SolidLine, Qt::RoundCap));
-			const auto dir = QPointF(std::cos(a), std::sin(a));
-			p.drawLine(dir * inner, dir * (inner + longest * value));
+		constexpr auto kWaveLife = crl::time(1100);
+		if (_playing) {
+			if (_beat > 0.55 && frame - _lastWave > 220) {
+				_waves.emplace_back(frame, std::clamp(_beat, 0.55, 1.));
+				_lastWave = frame;
+			} else if (frame - _lastWave > 1400) {
+				_waves.emplace_back(frame, 0.35); // calm music: a soft wave
+				_lastWave = frame;
+			}
 		}
+		_waves.erase(ranges::remove_if(_waves, [&](const auto &wave) {
+			return frame - wave.first >= kWaveLife;
+		}), end(_waves));
+		if (_waves.size() > 8) {
+			_waves.erase(_waves.begin(), _waves.end() - 8);
+		}
+		p.setBrush(Qt::NoBrush);
+		const auto rollDegrees = std::fmod(t * 110., 360.);
+		const auto makePen = [&](double alpha, double width, double turn) {
+			auto gradient = QConicalGradient(QPointF(), rollDegrees + turn);
+			auto bright = accent.lighter(150);
+			auto mid = accent;
+			auto dim = accent;
+			bright.setAlphaF(std::clamp(alpha, 0., 1.));
+			mid.setAlphaF(std::clamp(alpha * 0.55, 0., 1.));
+			dim.setAlphaF(std::clamp(alpha * 0.18, 0., 1.));
+			gradient.setColorAt(0., bright);
+			gradient.setColorAt(0.18, mid);
+			gradient.setColorAt(0.5, dim);
+			gradient.setColorAt(0.82, mid);
+			gradient.setColorAt(1., bright);
+			return QPen(QBrush(gradient), width);
+		};
+		for (const auto &[born, strength] : _waves) {
+			const auto age = (frame - born) / double(kWaveLife);
+			const auto ease = 1. - (1. - age) * (1. - age);
+			const auto grow = half * (0.03 + 0.55 * ease);
+			const auto alpha = strength * (1. - age) * (1. - age);
+			p.setPen(makePen(
+				alpha,
+				std::max(half * 0.07 * (1. - age), 1.5),
+				age * 140.));
+			p.drawRoundedRect(
+				box.adjusted(-grow, -grow, grow, grow),
+				radius + grow,
+				radius + grow);
+		}
+		// The edge itself glows and the bright arc rolls around it.
+		p.setPen(makePen(
+			0.55 + 0.45 * _beat,
+			std::max(half * (0.03 + 0.04 * _beat), 2.),
+			0.));
+		p.drawRoundedRect(
+			box.adjusted(-half * 0.02, -half * 0.02, half * 0.02, half * 0.02),
+			radius,
+			radius);
 	}
 	auto clip = QPainterPath();
 	clip.addRoundedRect(box, radius, radius);
@@ -2187,7 +2310,249 @@ private:
 
 };
 
+// Караоке: the whole window, the line to sing in the middle filling word
+// by word, the next lines under it, a countdown before a line starts.
+class KaraokeWidget final : public Ui::RpWidget {
+public:
+	explicit KaraokeWidget(QWidget *parent)
+	: RpWidget(parent)
+	, _timer([=] { update(); }) {
+		setFocusPolicy(Qt::StrongFocus);
+		setMouseTracking(true);
+		_timer.callEach(16);
+	}
+
+protected:
+	void keyPressEvent(QKeyEvent *e) override {
+		if (e->key() == Qt::Key_Escape) {
+			deleteLater();
+			return;
+		}
+		RpWidget::keyPressEvent(e);
+	}
+
+	void mouseReleaseEvent(QMouseEvent *e) override {
+		deleteLater();
+	}
+
+	void paintEvent(QPaintEvent *e) override {
+		auto p = QPainter(this);
+		p.setRenderHint(QPainter::Antialiasing);
+		const auto px = [](double value) {
+			return value * style::Scale() / 100.;
+		};
+		const auto accent = PaletteAt(
+			std::clamp(OptionInt(kOptionPalette), 0, PalettesCount() - 1),
+			0.).first;
+		const auto t = crl::now() / 1000.;
+		auto gradient = QRadialGradient(
+			QPointF(width() * (0.5 + 0.15 * std::sin(t * 0.2)), height() * 0.45),
+			std::max(width(), height()) * 0.8);
+		gradient.setColorAt(0., accent.darker(380));
+		gradient.setColorAt(1., QColor(6, 2, 4));
+		p.fillRect(rect(), gradient);
+
+		const auto &state = Current();
+		const auto now = position();
+		auto font = st::semiboldFont->f;
+		p.setPen(QColor(255, 255, 255, 120));
+		font.setPixelSize(int(px(14)));
+		p.setFont(font);
+		const auto &track = state.track;
+		p.drawText(
+			rect().adjusted(0, int(px(18)), 0, 0),
+			Qt::AlignHCenter | Qt::AlignTop,
+			(track.performer.isEmpty() ? QString() : (track.performer + QString::fromUtf8(" — ")))
+				+ track.title);
+		p.drawText(
+			rect().adjusted(0, 0, 0, -int(px(16))),
+			Qt::AlignHCenter | Qt::AlignBottom,
+			QString::fromUtf8("Караоке · Esc или клик — выйти"));
+		if (state.lines.empty()) {
+			font.setPixelSize(int(px(28)));
+			p.setFont(font);
+			p.setPen(QColor(255, 255, 255));
+			p.drawText(rect(), Qt::AlignCenter, QString::fromUtf8(state.loading
+				? "Ищу текст…"
+				: "У этой песни нет текста.\nНайди его: правый клик по треку → «Найти текст…»."));
+			return;
+		}
+		auto current = -1;
+		for (auto i = 0; i != int(state.lines.size()); ++i) {
+			if (state.lines[i].at <= now) {
+				current = i;
+			}
+		}
+		const auto big = px(std::clamp(width() / 22., 30., 64.));
+		const auto centerY = height() * 0.42;
+
+		// Countdown before the first line or after a long pause.
+		const auto next = current + 1;
+		if (next < int(state.lines.size())) {
+			const auto wait = state.lines[next].at - now;
+			const auto pause = (current < 0) || (now > state.lines[current].end + 1500);
+			if (pause && wait > 0 && wait < 3200) {
+				const auto dots = int(wait / 1000) + 1;
+				p.setPen(Qt::NoPen);
+				for (auto i = 0; i != 3; ++i) {
+					auto color = accent;
+					color.setAlpha(i < dots ? 255 : 50);
+					p.setBrush(color);
+					p.drawEllipse(
+						QPointF(width() / 2. + (i - 1) * px(28), centerY - big * 1.6),
+						px(7),
+						px(7));
+				}
+			}
+		}
+
+		// The previous line, small, above.
+		if (current > 0) {
+			font.setPixelSize(int(big * 0.5));
+			p.setFont(font);
+			p.setPen(QColor(255, 255, 255, 70));
+			p.drawText(
+				QRectF(px(40), centerY - big * 2.6, width() - px(80), big),
+				Qt::AlignCenter | Qt::TextWordWrap,
+				state.lines[current - 1].text);
+		}
+		// The line to sing, filling word by word.
+		auto bottom = centerY;
+		if (current >= 0) {
+			bottom = paintSungLine(p, state.lines[current], now, big, centerY, accent);
+		}
+		// The next lines, under it.
+		font.setPixelSize(int(big * 0.58));
+		p.setFont(font);
+		auto y = bottom + big * 0.5;
+		for (auto i = current + 1; i <= current + 2 && i < int(state.lines.size()); ++i) {
+			p.setPen(QColor(255, 255, 255, (i == current + 1) ? 140 : 70));
+			const auto box = QRectF(px(40), y, width() - px(80), big * 1.6);
+			const auto used = p.boundingRect(box, Qt::AlignHCenter | Qt::TextWordWrap, state.lines[i].text);
+			p.drawText(box, Qt::AlignHCenter | Qt::TextWordWrap, state.lines[i].text);
+			y += used.height() + big * 0.25;
+		}
+	}
+
+private:
+	// Returns the bottom of the drawn line.
+	double paintSungLine(
+			QPainter &p,
+			const Line &line,
+			crl::time now,
+			double size,
+			double centerY,
+			const QColor &accent) {
+		auto font = st::semiboldFont->f;
+		font.setPixelSize(int(size));
+		font.setWeight(QFont::Black);
+		p.setFont(font);
+		const auto metrics = QFontMetricsF(font);
+		const auto words = line.text.split(' ', Qt::SkipEmptyParts);
+		const auto space = metrics.horizontalAdvance(' ');
+		const auto maxWidth = width() * 0.86;
+		// Word times: from the file, or the line split by word length.
+		auto starts = std::vector<crl::time>();
+		auto ends = std::vector<crl::time>();
+		if (line.wordTimes.size() == size_t(words.size())) {
+			for (auto i = 0; i != words.size(); ++i) {
+				starts.push_back(line.wordTimes[i]);
+				ends.push_back((i + 1 < words.size()) ? line.wordTimes[i + 1] : line.end);
+			}
+		} else {
+			auto total = 0;
+			for (const auto &word : words) {
+				total += word.size() + 1;
+			}
+			const auto span = std::max(line.end - line.at, crl::time(400)) * 0.85;
+			auto at = double(line.at);
+			for (const auto &word : words) {
+				starts.push_back(crl::time(at));
+				at += span * (word.size() + 1) / std::max(total, 1);
+				ends.push_back(crl::time(at));
+			}
+		}
+		// Rows that fit the width.
+		auto rows = std::vector<std::vector<int>>(1);
+		auto rowWidth = 0.;
+		for (auto i = 0; i != words.size(); ++i) {
+			const auto w = metrics.horizontalAdvance(words[i]);
+			if (!rows.back().empty() && rowWidth + space + w > maxWidth) {
+				rows.emplace_back();
+				rowWidth = 0.;
+			}
+			rowWidth += (rows.back().empty() ? 0. : space) + w;
+			rows.back().push_back(i);
+		}
+		const auto rowHeight = metrics.height() * 1.1;
+		auto y = centerY - (rows.size() - 1) * rowHeight / 2.;
+		auto lit = accent.lighter(130);
+		for (const auto &row : rows) {
+			auto full = 0.;
+			for (const auto i : row) {
+				full += metrics.horizontalAdvance(words[i]);
+			}
+			full += space * (row.size() - 1);
+			auto x = (width() - full) / 2.;
+			for (const auto i : row) {
+				const auto w = metrics.horizontalAdvance(words[i]);
+				const auto baseline = y + metrics.ascent() / 2.;
+				p.setPen(QColor(255, 255, 255, 90));
+				p.drawText(QPointF(x, baseline), words[i]);
+				const auto k = std::clamp(
+					double(now - starts[i]) / std::max(ends[i] - starts[i], crl::time(60)),
+					0.,
+					1.);
+				if (k > 0.) {
+					p.save();
+					p.setClipRect(QRectF(x, y - rowHeight, w * k, rowHeight * 2.));
+					p.setPen(lit);
+					p.drawText(QPointF(x, baseline), words[i]);
+					p.restore();
+				}
+				x += w + space;
+			}
+			y += rowHeight;
+		}
+		return y;
+	}
+
+	[[nodiscard]] crl::time position() {
+		const auto playing = ::Media::Player::instance()->getState(
+			AudioMsgId::Type::Song);
+		const auto frequency = std::max(playing.frequency, 1);
+		const auto value = crl::time(playing.position * 1000 / frequency);
+		const auto now = crl::now();
+		if (value != _lastPosition) {
+			_lastPosition = value;
+			_lastAt = now;
+		}
+		const auto running = ::Media::Player::ShowPauseIcon(playing.state);
+		return _lastPosition
+			+ (running ? std::min(now - _lastAt, crl::time(1000)) : 0)
+			+ Current().offset;
+	}
+
+	base::Timer _timer;
+	crl::time _lastPosition = -1;
+	crl::time _lastAt = 0;
+
+};
+
 } // namespace
+
+void ShowKaraoke(not_null<Window::SessionController*> controller) {
+	const auto parent = controller->widget()->bodyWidget();
+	const auto widget = Ui::CreateChild<KaraokeWidget>(parent);
+	widget->setGeometry(QRect(QPoint(), parent->size()));
+	parent->sizeValue(
+	) | rpl::on_next([=](QSize size) {
+		widget->setGeometry(QRect(QPoint(), size));
+	}, widget->lifetime());
+	widget->show();
+	widget->raise();
+	widget->setFocus();
+}
 
 void ShowLyricsList(not_null<Window::SessionController*> controller) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
@@ -2208,6 +2573,10 @@ void ShowLyricsList(not_null<Window::SessionController*> controller) {
 		box->addButton(rpl::single(QString::fromUtf8("Сдвиг")), [=] {
 			ShowOffsetBox(controller);
 		});
+		box->addButton(rpl::single(QString::fromUtf8("Караоке")), [=] {
+			box->closeBox();
+			ShowKaraoke(controller);
+		});
 		box->addLeftButton(rpl::single(QString::fromUtf8("Закрыть")), [=] {
 			box->closeBox();
 		});
@@ -2226,7 +2595,17 @@ void FillSongMenu(
 			: QString::fromUtf8("Спрятать чаты (текст песни)")),
 		[] { ToggleHideChats(); },
 		&st::menuIconShowAll);
-	if (Current().track.document) {
+	if (const auto document = Current().track.document) {
+		menu->addAction(
+			QString::fromUtf8("Своя обложка песни…"),
+			[=] { CustomCovers::Pick(controller, document); },
+			&st::menuIconPhoto);
+		if (CustomCovers::Has(document)) {
+			menu->addAction(
+				QString::fromUtf8("Убрать свою обложку"),
+				[=] { CustomCovers::Remove(document); },
+				&st::menuIconDelete);
+		}
 		menu->addAction(
 			QString::fromUtf8("Сдвиг текста песни…"),
 			[=] { ShowOffsetBox(controller); },
@@ -2235,6 +2614,10 @@ void FillSongMenu(
 			QString::fromUtf8("Найти текст…"),
 			[=] { ShowSearchBox(controller); },
 			&st::menuIconSearch);
+		menu->addAction(
+			QString::fromUtf8("Караоке"),
+			[=] { ShowKaraoke(controller); },
+			&st::menuIconSoundOn);
 		menu->addAction(
 			QString::fromUtf8("Написать / исправить текст…"),
 			[=] { ShowSyncEditor(controller); },
