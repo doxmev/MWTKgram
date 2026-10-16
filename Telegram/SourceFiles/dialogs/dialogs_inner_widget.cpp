@@ -1135,7 +1135,11 @@ void InnerWidget::paintEvent(QPaintEvent *e) {
 			: _chatPreviewRow.key
 			? (row->key() == _chatPreviewRow.key)
 			: selected;
+		// MWTK: cached rows are RGB32 images that are not cleared before
+		// painting; with a see-through row background the old memory
+		// showed through (other chats doubled while scrolling).
 		const auto cacheAllowed = _rowsScrollCache.scrolling()
+			&& !Mwtk::ChatListTransparent()
 			&& (!videoUserpic || !context.narrow)
 			&& !active
 			&& !cacheSelected
