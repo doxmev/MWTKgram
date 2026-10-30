@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - raspigram
     paths-ignore:
       - '**.md'
       - 'docs/**'
 
 concurrency:
-  group: raspigram-win-${{ github.ref }}
+  group: raspigram-build-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -357,11 +357,11 @@ jobs:
           retention-days: 14
 
       - name: Publish release.
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/raspigram'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "build-${{ github.run_number }}"
+          $tag = "raspi-${{ github.run_number }}"
           Compress-Archive -Path artifact\RASPIgram.exe -DestinationPath RASPIgram-x64.zip -Force
-          gh release create $tag installer\RASPIgram-Setup.exe RASPIgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RASPIgram (build ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. RASPIgram-Setup.exe installs the client and updates it later from inside the app; the zip is the portable version." --latest
+          gh release create $tag installer\RASPIgram-Setup.exe RASPIgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RASPIgram (сборка ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. RASPIgram-Setup.exe installs the client and updates it later from inside the app; the zip is the portable version."
