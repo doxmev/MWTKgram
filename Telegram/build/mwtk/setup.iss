@@ -1,5 +1,5 @@
-﻿; MWTKgram installer (Inno Setup 6).
-; Installs for the current user into %APPDATA%\MWTKgram, so no admin rights
+﻿; RASPIgram installer (Inno Setup 6).
+; Installs for the current user into %APPDATA%\RASPIgram, so no admin rights
 ; are needed and the chats (tdata) live next to the program, not on the
 ; desktop. The in-app updater runs this file with /SILENT /OLDDIR=<folder>.
 
@@ -14,24 +14,24 @@
 #endif
 
 [Setup]
-AppId={{6B0C3E52-6F0F-4C4E-9D2C-7E1C9A4D3B11}
-AppName=MWTKgram
+AppId={{B696DCC4-9232-405E-862B-34AEF711595C}
+AppName=RASPIgram
 AppVersion={#AppVersion}
-AppVerName=MWTKgram (сборка {#AppVersion})
-AppPublisher=MWTKgram
-AppPublisherURL=https://github.com/doxmev/MWTKgram
-DefaultDirName={userappdata}\MWTKgram
+AppVerName=RASPIgram (сборка {#AppVersion})
+AppPublisher=RASPIgram
+AppPublisherURL=https://github.com/doxmev/RASPIgram
+DefaultDirName={userappdata}\RASPIgram
 DisableDirPage=yes
-DefaultGroupName=MWTKgram
+DefaultGroupName=RASPIgram
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir={#OutputDir}
-OutputBaseFilename=MWTKgram-Setup
+OutputBaseFilename=RASPIgram-Setup
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayIcon={app}\MWTKgram.exe
-UninstallDisplayName=MWTKgram
+UninstallDisplayIcon={app}\RASPIgram.exe
+UninstallDisplayName=RASPIgram
 CloseApplications=force
 RestartApplications=no
 ArchitecturesAllowed=x64compatible
@@ -45,14 +45,14 @@ Name: "en"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Ярлык на рабочем столе"; GroupDescription: "Ярлыки:"
 
 [Files]
-Source: "{#SourceDir}\MWTKgram.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\RASPIgram.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{userprograms}\MWTKgram"; Filename: "{app}\MWTKgram.exe"; WorkingDir: "{app}"
-Name: "{userdesktop}\MWTKgram"; Filename: "{app}\MWTKgram.exe"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{userprograms}\RASPIgram"; Filename: "{app}\RASPIgram.exe"; WorkingDir: "{app}"
+Name: "{userdesktop}\RASPIgram"; Filename: "{app}\RASPIgram.exe"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\MWTKgram.exe"; Description: "Запустить MWTKgram"; WorkingDir: "{app}"; Flags: nowait postinstall
+Filename: "{app}\RASPIgram.exe"; Description: "Запустить RASPIgram"; WorkingDir: "{app}"; Flags: nowait postinstall
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\DebugLogs"
@@ -73,12 +73,12 @@ var
 begin
   OldDirPage := CreateInputDirPage(wpSelectTasks,
     'Перенос данных',
-    'Был ли MWTKgram у тебя раньше?',
-    'Если ты уже запускал MWTKgram.exe из какой-то папки (например, с рабочего стола), ' +
+    'Был ли RASPIgram у тебя раньше?',
+    'Если ты уже запускал RASPIgram.exe из какой-то папки (например, с рабочего стола), ' +
     'выбери эту папку — вход в аккаунт и настройки перенесутся. ' +
     'Если клиента раньше не было, просто нажми «Далее».',
     False, '');
-  OldDirPage.Add('Папка, где лежал старый MWTKgram.exe:');
+  OldDirPage.Add('Папка, где лежал старый RASPIgram.exe:');
   Initial := ExpandConstant('{param:OLDDIR|}');
   if Initial = '' then
     Initial := ExpandConstant('{userdesktop}');
@@ -87,7 +87,9 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = OldDirPage.ID) and AlreadyHasData();
+  // A new client: nothing to carry over unless the updater passed /OLDDIR.
+  Result := (PageID = OldDirPage.ID)
+    and (AlreadyHasData() or (ExpandConstant('{param:OLDDIR|}') = ''));
 end;
 
 procedure MigrateOldData();

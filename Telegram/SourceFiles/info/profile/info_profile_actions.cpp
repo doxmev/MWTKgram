@@ -1721,13 +1721,13 @@ Section DetailsFiller::makeInfo() {
 		{
 			const auto controller = _controller->parentController();
 			const auto note = addInfoLine(
-				rpl::single(QString::fromUtf8("Заметка MWTK")),
+				rpl::single(QString::fromUtf8("Заметка RASPIgram")),
 				Mwtk::Notes::Value(user) | rpl::map(tr::marked));
 			note.text->setContextMenuHook([=, raw = note.text](
 					Ui::FlatLabel::ContextMenuRequest request) {
 				raw->fillContextMenu(request);
 				request.menu->addAction(
-					QString::fromUtf8("Изменить заметку MWTK"),
+					QString::fromUtf8("Изменить заметку RASPIgram"),
 					[=] { Mwtk::Notes::ShowEditBox(controller, user); },
 					&st::menuIconEdit);
 			});

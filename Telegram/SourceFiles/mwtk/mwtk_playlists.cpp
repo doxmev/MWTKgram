@@ -567,7 +567,7 @@ void ShowPlaylistBox(
 					object_ptr<Ui::FlatLabel>(
 						content,
 						rpl::single(Utf("Плейлист пуст. Нажми правой кнопкой "
-							"на любой трек в чате → «В плейлист MWTK…».")),
+							"на любой трек в чате → «В плейлист RASPIgram…».")),
 						st::boxDividerLabel),
 					st::boxRowPadding);
 			}

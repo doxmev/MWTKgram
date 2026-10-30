@@ -1184,8 +1184,8 @@ void Filler::addMwtkNote() {
 	const auto peer = _peer;
 	_addAction(
 		(Mwtk::Notes::Get(peer).isEmpty()
-			? QString::fromUtf8("Добавить заметку MWTK")
-			: QString::fromUtf8("Изменить заметку MWTK")),
+			? QString::fromUtf8("Добавить заметку RASPIgram")
+			: QString::fromUtf8("Изменить заметку RASPIgram")),
 		[=] { Mwtk::Notes::ShowEditBox(controller, peer); },
 		&st::menuIconEdit);
 }
@@ -1198,8 +1198,8 @@ void Filler::addMwtkRename() {
 	const auto peer = _peer;
 	_addAction(
 		(Mwtk::Names::Get(peer).isEmpty()
-			? QString::fromUtf8("Своё название (MWTK)")
-			: QString::fromUtf8("Изменить своё название (MWTK)")),
+			? QString::fromUtf8("Своё название (RASPIgram)")
+			: QString::fromUtf8("Изменить своё название (RASPIgram)")),
 		[=] { Mwtk::Names::ShowEditBox(controller, peer); },
 		&st::menuIconEdit);
 }
@@ -1212,8 +1212,8 @@ void Filler::addMwtkHide() {
 	const auto peer = _peer;
 	_addAction(
 		(Mwtk::Hidden::IsHidden(peer)
-			? QString::fromUtf8("Вернуть из скрытых (MWTK)")
-			: QString::fromUtf8("Скрыть чат (MWTK)")),
+			? QString::fromUtf8("Вернуть из скрытых (RASPIgram)")
+			: QString::fromUtf8("Скрыть чат (RASPIgram)")),
 		[=] { Mwtk::Hidden::Toggle(controller, peer); },
 		&st::menuIconLock);
 }
@@ -1225,7 +1225,7 @@ void Filler::addMwtkDeleted() {
 	const auto controller = _controller;
 	const auto peer = _peer;
 	_addAction(
-		QString::fromUtf8("Удалённые сообщения (MWTK)"),
+		QString::fromUtf8("Удалённые сообщения (RASPIgram)"),
 		[=] { Mwtk::Deleted::ShowBox(controller, peer); },
 		&st::menuIconDelete);
 }
@@ -1244,7 +1244,7 @@ void Filler::addMwtkTogether() {
 			&st::menuIconLeave);
 	} else {
 		_addAction(
-			QString::fromUtf8("Слушать музыку вместе (MWTK)"),
+			QString::fromUtf8("Слушать музыку вместе (RASPIgram)"),
 			[=] { Mwtk::Together::Invite(controller, peer); },
 			&st::menuIconSoundOn);
 	}

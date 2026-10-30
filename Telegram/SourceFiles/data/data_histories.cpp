@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "data/data_histories.h"
 
+#include "mwtk/mwtk_options.h"
+
 #include "mwtk/mwtk_deleted.h"
 
 #include "api/api_text_entities.h"
@@ -765,6 +767,11 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 			sendReadRequests();
 			finish();
 		};
+		if (Mwtk::GhostActive()) {
+			// RASPIgram ghost mode: read here, the sender never knows.
+			crl::on_main(&session(), finished);
+			return mtpRequestId(0);
+		}
 		if (const auto channel = history->peer->asChannel()) {
 			return session().api().request(MTPchannels_ReadHistory(
 				channel->inputChannel(),

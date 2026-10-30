@@ -2397,6 +2397,8 @@ PRIVATE
     mwtk/mwtk_scene.h
     mwtk/mwtk_phrases.cpp
     mwtk/mwtk_phrases.h
+    mwtk/mwtk_raspi.cpp
+    mwtk/mwtk_raspi.h
     mwtk/mwtk_playlists.cpp
     mwtk/mwtk_playlists.h
     mwtk/mwtk_seasons.cpp

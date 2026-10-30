@@ -808,7 +808,7 @@ namespace details {
 
 namespace {
 
-// MWTKgram: strings that name the application itself say "MWTKgram".
+// RASPIgram: strings that name the application itself say "RASPIgram".
 // Strings about the Telegram service (login codes, Premium, accounts)
 // are left as they are.
 [[nodiscard]] QString Brand(ushort key, QString value) {
@@ -835,16 +835,16 @@ namespace {
 		const auto russian = value.contains(QChar(0x0430))
 			|| value.contains(QChar(0x043E));
 		return russian
-			? QString::fromUtf8("Добро пожаловать в MWTKgram —\n"
-				"неофициальный клиент Telegram с эффектами MWTK.")
-			: QString::fromUtf8("Welcome to MWTKgram —\n"
-				"an unofficial Telegram client with MWTK effects.");
+			? QString::fromUtf8("Добро пожаловать в RASPIgram —\n"
+				"неофициальный клиент Telegram.")
+			: QString::fromUtf8("Welcome to RASPIgram —\n"
+				"an unofficial Telegram client.");
 	}
 	if (!keys.contains(key)) {
 		return value;
 	}
-	value.replace(u"Telegram Desktop"_q, u"MWTKgram"_q);
-	value.replace(u"Telegram"_q, u"MWTKgram"_q);
+	value.replace(u"Telegram Desktop"_q, u"RASPIgram"_q);
+	value.replace(u"Telegram"_q, u"RASPIgram"_q);
 	return value;
 }
 

@@ -23,8 +23,8 @@ namespace Mwtk {
 namespace {
 
 constexpr auto kPi = 3.14159265358979323846;
-constexpr auto kRainbowIndex = 6;
-constexpr auto kCustomIndex = 7;
+constexpr auto kRainbowIndex = 7;
+constexpr auto kCustomIndex = 8;
 
 struct PaletteData {
 	const char *name;
@@ -35,6 +35,7 @@ struct PaletteData {
 };
 
 const PaletteData kPalettes[] = {
+	{ "Зелёный", 0xff00c853, 0xff69ff8f, 0xff00e5a0, 0xff39ff6a },
 	{ "Кровавокрасный", 0xff7a0000, 0xffff1f1f, 0xffff6a4d, 0xffff0000 },
 	{ "Розовый", 0xffff2fa6, 0xffff8ad8, 0xffc13bff, 0xffff4fc1 },
 	{ "Чёрный", 0xff050505, 0xff3a3a3a, 0xff8a8a8a, 0xffffffff },

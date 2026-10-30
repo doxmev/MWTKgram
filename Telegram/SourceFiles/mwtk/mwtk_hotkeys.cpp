@@ -171,7 +171,7 @@ void Run(Action action) {
 		auto &option = base::options::lookup<int>(kOptionQuality);
 		option.set((option.value() + 1) % kQualityCount);
 		if (controller) {
-			controller->showToast(QString::fromUtf8("Качество MWTK: %1")
+			controller->showToast(QString::fromUtf8("Качество RASPIgram: %1")
 				.arg(QualityName(option.value())));
 		}
 	} break;
@@ -196,7 +196,7 @@ QString ActionName(Action action) {
 	switch (action) {
 	case Action::Playlists: return QString::fromUtf8("Плейлисты");
 	case Action::HideChats: return QString::fromUtf8("Спрятать чаты (текст песни)");
-	case Action::Settings: return QString::fromUtf8("Настройки MWTKgram");
+	case Action::Settings: return QString::fromUtf8("Настройки RASPIgram");
 	case Action::NextTrack: return QString::fromUtf8("Следующий трек");
 	case Action::PreviousTrack: return QString::fromUtf8("Предыдущий трек");
 	case Action::QualityCycle: return QString::fromUtf8("Сменить качество эффектов");

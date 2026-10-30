@@ -39,14 +39,85 @@ base::options::toggle OptionObjects({
 	.id = kOptionObjects,
 	.name = "MWTKgram 3D objects",
 	.description = "Floating 3D wireframe objects.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionParticles({
 	.id = kOptionParticles,
 	.name = "MWTKgram particles",
 	.description = "Floating glowing particles.",
-	.defaultValue = true,
+	.defaultValue = false,
+});
+
+// RASPIgram: the flying text says what the user wrote.
+base::options::option<QString> OptionWatermarkText({
+	.id = kOptionWatermarkText,
+	.name = "RASPIgram flying text",
+	.description = "Text of the flying label.",
+	.defaultValue = QString::fromUtf8("распиздяйчик"),
+});
+
+base::options::toggle OptionGhost({
+	.id = kOptionGhost,
+	.name = "RASPIgram ghost mode",
+	.description = "No read marks, no typing, always offline.",
+	.defaultValue = false,
+});
+
+base::options::option<int> OptionAiProvider({
+	.id = kOptionAiProvider,
+	.name = "RASPIgram AI provider",
+	.description = "0 OpenAI, 1 Anthropic, 2 Gemini, 3 other OpenAI-like.",
+	.defaultValue = 0,
+});
+
+base::options::option<QString> OptionAiKey({
+	.id = kOptionAiKey,
+	.name = "RASPIgram AI key",
+	.description = "Personal API key for the AI editor.",
+	.defaultValue = QString(),
+});
+
+base::options::option<QString> OptionAiModel({
+	.id = kOptionAiModel,
+	.name = "RASPIgram AI model",
+	.description = "Model name; empty for the provider default.",
+	.defaultValue = QString(),
+});
+
+base::options::option<QString> OptionAiUrl({
+	.id = kOptionAiUrl,
+	.name = "RASPIgram AI address",
+	.description = "Base address for other OpenAI-like services.",
+	.defaultValue = QString(),
+});
+
+base::options::toggle OptionWeather({
+	.id = kOptionWeather,
+	.name = "RASPIgram weather",
+	.description = "Daily weather notification.",
+	.defaultValue = false,
+});
+
+base::options::option<QString> OptionWeatherCity({
+	.id = kOptionWeatherCity,
+	.name = "RASPIgram weather city",
+	.description = "City for the weather notification.",
+	.defaultValue = QString(),
+});
+
+base::options::option<int> OptionWeatherTime({
+	.id = kOptionWeatherTime,
+	.name = "RASPIgram weather time",
+	.description = "Minutes after midnight for the weather notification.",
+	.defaultValue = 8 * 60,
+});
+
+base::options::option<QString> OptionWeatherShown({
+	.id = kOptionWeatherShown,
+	.name = "RASPIgram weather shown",
+	.description = "Date of the last weather notification.",
+	.defaultValue = QString(),
 });
 
 base::options::option<int> OptionPalette({
@@ -95,7 +166,7 @@ base::options::toggle OptionRoomParallax({
 	.id = kOptionRoomParallax,
 	.name = "MWTKgram room parallax",
 	.description = "Camera follows the mouse.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionRoomMotion({
@@ -116,14 +187,14 @@ base::options::toggle OptionBubbles3d({
 	.id = kOptionBubbles3d,
 	.name = "MWTKgram 3D message bubbles",
 	.description = "Volumetric message bubbles.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionBubblesTint({
 	.id = kOptionBubblesTint,
 	.name = "MWTKgram tinted message bubbles",
 	.description = "Message bubbles follow the MWTKgram color.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionBubblesOpacity({
@@ -137,7 +208,7 @@ base::options::toggle OptionCards3d({
 	.id = kOptionCards3d,
 	.name = "MWTKgram 3D chat list",
 	.description = "Chat list rows as volumetric cards.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionQuality({
@@ -165,14 +236,14 @@ base::options::toggle OptionButtons3d({
 	.id = kOptionButtons3d,
 	.name = "MWTKgram 3D buttons",
 	.description = "Volumetric buttons.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionButtonsAnimated({
 	.id = kOptionButtonsAnimated,
 	.name = "MWTKgram animated buttons",
 	.description = "Animated glowing button highlight.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionSceneBase({
@@ -235,14 +306,14 @@ base::options::toggle OptionCursorTrail({
 	.id = kOptionCursorTrail,
 	.name = "MWTKgram cursor trail",
 	.description = "Neon trail behind the mouse cursor.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionUiSounds({
 	.id = kOptionUiSounds,
 	.name = "MWTKgram interface sounds",
 	.description = "Soft sounds for clicks, sending and F9.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionUiSoundsVolume({
@@ -256,14 +327,14 @@ base::options::toggle OptionSendEffect({
 	.id = kOptionSendEffect,
 	.name = "MWTKgram send effect",
 	.description = "Particle burst when a message is sent.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionMessageAppear({
 	.id = kOptionMessageAppear,
 	.name = "MWTKgram message appear animation",
 	.description = "New messages slide in smoothly.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionChatListOpacity({
@@ -277,7 +348,7 @@ base::options::toggle OptionAvatarGlow({
 	.id = kOptionAvatarGlow,
 	.name = "MWTKgram glowing avatars",
 	.description = "Neon ring around avatars in the chat list.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::option<int> OptionAvatarOnlineColor({
@@ -305,7 +376,7 @@ base::options::toggle OptionNightEvents({
 	.id = kOptionNightEvents,
 	.name = "MWTKgram night events",
 	.description = "Secrets that appear at 3 AM.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionSaveDeleted({
@@ -501,7 +572,7 @@ base::options::toggle OptionMusicPulse({
 	.id = kOptionMusicPulse,
 	.name = "MWTKgram music pulse",
 	.description = "Background reacts to the beat.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionSeasons({
@@ -515,7 +586,7 @@ base::options::toggle OptionFlyby({
 	.id = kOptionFlyby,
 	.name = "MWTKgram message fly-by",
 	.description = "Userpic flies over the background on new messages.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionFlybyFavorites({
@@ -529,14 +600,14 @@ base::options::toggle OptionHoloProfile({
 	.id = kOptionHoloProfile,
 	.name = "MWTKgram holographic profile",
 	.description = "Hologram effect on profile cards.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 base::options::toggle OptionQuickPhrases({
 	.id = kOptionQuickPhrases,
 	.name = "MWTKgram quick phrases",
 	.description = "Suggest saved phrases after typing a slash.",
-	.defaultValue = true,
+	.defaultValue = false,
 });
 
 } // namespace
@@ -615,6 +686,16 @@ const char kOptionFlyby[] = "mwtk-flyby";
 const char kOptionFlybyFavorites[] = "mwtk-flyby-favorites";
 const char kOptionHoloProfile[] = "mwtk-holo-profile";
 const char kOptionQuickPhrases[] = "mwtk-quick-phrases";
+const char kOptionWatermarkText[] = "raspi-flying-text";
+const char kOptionGhost[] = "raspi-ghost";
+const char kOptionAiProvider[] = "raspi-ai-provider";
+const char kOptionAiKey[] = "raspi-ai-key";
+const char kOptionAiModel[] = "raspi-ai-model";
+const char kOptionAiUrl[] = "raspi-ai-url";
+const char kOptionWeather[] = "raspi-weather";
+const char kOptionWeatherCity[] = "raspi-weather-city";
+const char kOptionWeatherTime[] = "raspi-weather-time";
+const char kOptionWeatherShown[] = "raspi-weather-shown";
 
 QString QualityName(int index) {
 	switch (index) {
@@ -719,6 +800,7 @@ bool VisualsEnabled() {
 SceneConfig CurrentConfig(double scale) {
 	auto result = SceneConfig();
 	result.text = OptionWatermark.value();
+	result.label = OptionWatermarkText.value().trimmed();
 	result.objects = OptionObjects.value();
 	result.particles = OptionParticles.value();
 	result.palette = std::clamp(OptionPalette.value(), 0, PalettesCount() - 1);
@@ -739,6 +821,7 @@ rpl::producer<> ConfigChanges() {
 		OptionBackgroundAnimation.changes(),
 		OptionVisuals.changes(),
 		OptionWatermark.changes(),
+		OptionWatermarkText.changes(),
 		OptionObjects.changes(),
 		OptionParticles.changes(),
 		OptionPalette.changes(),
@@ -979,6 +1062,10 @@ rpl::producer<> InterfaceConfigChanges() {
 		OptionPalette.changes());
 }
 
+bool GhostActive() {
+	return OptionGhost.value();
+}
+
 bool OptionValue(const char id[]) {
 	return base::options::value<bool>(id);
 }
@@ -1063,6 +1150,11 @@ std::vector<const char*> AllOptionIds() {
 		kOptionFlybyFavorites,
 		kOptionHoloProfile,
 		kOptionQuickPhrases,
+		kOptionWatermarkText,
+		kOptionGhost,
+		kOptionWeather,
+		kOptionWeatherCity,
+		kOptionWeatherTime,
 	};
 }
 

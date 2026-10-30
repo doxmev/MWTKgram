@@ -3148,7 +3148,7 @@ void HistoryInner::showContextMenu(QContextMenuEvent *e, bool showFromTouch) {
 			}
 		}
 		if (item && document->isAudioFile()) {
-			_menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+			_menu->addAction(QString::fromUtf8("В плейлист RASPIgram…"), [=] {
 				Mwtk::Playlists::ShowAddToPlaylistBox(controller, itemId);
 			}, &st::menuIconAddToFolder);
 			Mwtk::Lyrics::FillSongMenu(_menu.get(), controller);

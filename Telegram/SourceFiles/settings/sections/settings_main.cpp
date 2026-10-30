@@ -382,7 +382,7 @@ void BuildSectionButtons(SectionBuilder &builder) {
 	}
 
 	builder.addButton({
-		.title = rpl::single(u"MWTKgram"_q),
+		.title = rpl::single(u"RASPIgram"_q),
 		.icon = {
 			&st::menuIconPalette,
 			IconType::Rounded,

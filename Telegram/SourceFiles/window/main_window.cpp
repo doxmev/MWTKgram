@@ -143,7 +143,7 @@ const char kOptionDisableTouchbar[] = "touchbar-disabled";
 
 namespace {
 
-// MWTKgram: the application icon can be switched in the settings.
+// RASPIgram: the application icon can be switched in the settings.
 [[nodiscard]] const QImage &MwtkLogo(bool margin) {
 	static const auto names = std::array<const char*, 4>{
 		nullptr,
@@ -947,7 +947,7 @@ void MainWindow::updateTitle() {
 		: Dialogs::Key();
 	const auto thread = key ? key.thread() : nullptr;
 	if (!thread) {
-		setTitle((user.isEmpty() ? u"MWTKgram"_q : user) + added + suffix);
+		setTitle((user.isEmpty() ? u"RASPIgram"_q : user) + added + suffix);
 		return;
 	}
 	const auto history = thread->owningHistory();

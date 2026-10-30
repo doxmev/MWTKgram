@@ -526,7 +526,7 @@ void AddDocumentActions(
 	}
 	if (item && document->isAudioFile()) {
 		const auto controller = list->controller();
-		menu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+		menu->addAction(QString::fromUtf8("В плейлист RASPIgram…"), [=] {
 			Mwtk::Playlists::ShowAddToPlaylistBox(controller, contextId);
 		}, &st::menuIconAddToFolder);
 		Mwtk::Lyrics::FillSongMenu(menu, controller);

@@ -1546,7 +1546,7 @@ void ListWidget::showContextMenu(
 			if (document->isAudioFile()) {
 				const auto window = _controller->parentController();
 				const auto itemId = item->fullId();
-				_contextMenu->addAction(QString::fromUtf8("В плейлист MWTK…"), [=] {
+				_contextMenu->addAction(QString::fromUtf8("В плейлист RASPIgram…"), [=] {
 					Mwtk::Playlists::ShowAddToPlaylistBox(window, itemId);
 				}, &st::menuIconAddToFolder);
 			}

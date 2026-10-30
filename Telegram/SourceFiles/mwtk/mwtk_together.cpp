@@ -530,7 +530,7 @@ void Invite(
 	WatchPlayer();
 	Send(session, peer, Message(
 		QString::fromUtf8(
-			"Зову слушать музыку вместе. Нужен MWTKgram — он спросит, согласен ли ты."),
+			"Зову слушать музыку вместе. Нужен RASPIgram или MWTKgram — он спросит, согласен ли ты."),
 		{ .type = u"invite"_q, .session = state.id }));
 	controller->showToast(QString::fromUtf8(
 		"Приглашение отправлено. Музыка пойдёт, когда %1 примет его.").arg(NameOf(peer)));

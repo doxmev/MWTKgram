@@ -83,7 +83,7 @@ void FillMenu(
 	if (!item || !item->allowsForward() || !item->isRegular()) {
 		return;
 	}
-	menu->addAction(QString::fromUtf8("Напомнить (MWTK)…"), [=] {
+	menu->addAction(QString::fromUtf8("Напомнить (RASPIgram)…"), [=] {
 		controller->show(Box([=](not_null<Ui::GenericBox*> box) {
 			box->setTitle(rpl::single(QString::fromUtf8("Напомнить")));
 			box->addRow(object_ptr<Ui::FlatLabel>(

@@ -187,9 +187,9 @@ void ImportTheme(
 		not_null<Window::SessionController*> controller,
 		const QJsonObject &root) {
 	const auto name = root.value(u"name"_q).toString(
-		QString::fromUtf8("Тема MWTK"));
+		QString::fromUtf8("Тема RASPIgram"));
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(QString::fromUtf8("Тема MWTK")));
+		box->setTitle(rpl::single(QString::fromUtf8("Тема RASPIgram")));
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			rpl::single(QString::fromUtf8(
@@ -220,11 +220,11 @@ void ImportSync(
 		return;
 	}
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(QString::fromUtf8("Синхронизация MWTK")));
+		box->setTitle(rpl::single(QString::fromUtf8("Синхронизация RASPIgram")));
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			rpl::single(QString::fromUtf8(
-				"Загрузить настройки MWTK, плейлисты, заметки, свои названия, "
+				"Загрузить настройки RASPIgram, плейлисты, заметки, свои названия, "
 				"фразы и скрытые чаты из этого файла? Текущие заменятся.")),
 			st::boxLabel));
 		box->addButton(rpl::single(QString::fromUtf8("Загрузить")), [=] {
@@ -244,7 +244,7 @@ void ImportSync(
 				QString::fromUtf8("Готово"),
 				QString::fromUtf8(
 					"Настройки загружены. Чтобы плейлисты, заметки и скрытые "
-					"чаты обновились, перезапусти MWTKgram."),
+					"чаты обновились, перезапусти RASPIgram."),
 				true);
 		});
 		box->addButton(rpl::single(QString::fromUtf8("Отмена")), [=] {
@@ -258,14 +258,14 @@ void ImportSync(
 void ExportTheme(not_null<Window::SessionController*> controller) {
 	auto root = QJsonObject();
 	root.insert(u"format"_q, kThemeFormat);
-	root.insert(u"name"_q, QString::fromUtf8("Тема MWTK от %1").arg(
+	root.insert(u"name"_q, QString::fromUtf8("Тема RASPIgram от %1").arg(
 		controller->session().user()->name()));
 	root.insert(u"options"_q, CollectOptions(true));
 	const auto data = kThemeMagic
 		+ QJsonDocument(root).toJson(QJsonDocument::Indented);
 	FileDialog::GetWritePath(
 		Core::App().getFileDialogParent(),
-		QString::fromUtf8("Сохранить тему MWTK"),
+		QString::fromUtf8("Сохранить тему RASPIgram"),
 		u"MWTK theme (*.mwtktheme)"_q,
 		u"MWTK.mwtktheme"_q,
 		crl::guard(controller, [=](QString &&path) {
@@ -280,7 +280,7 @@ void ExportTheme(not_null<Window::SessionController*> controller) {
 					controller,
 					QString::fromUtf8("Тема сохранена"),
 					QString::fromUtf8(
-						"Выложи файл в канал или отправь другу. В MWTKgram "
+						"Выложи файл в канал или отправь другу. В RASPIgram "
 						"достаточно нажать на него, чтобы применить тему."),
 					false);
 			}

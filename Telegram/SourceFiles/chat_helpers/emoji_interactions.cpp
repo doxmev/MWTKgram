@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "chat_helpers/emoji_interactions.h"
 
+#include "mwtk/mwtk_options.h"
+
 #include "chat_helpers/stickers_emoji_pack.h"
 #include "history/history_item.h"
 #include "history/history.h"
@@ -315,7 +317,7 @@ void EmojiInteractions::sendAccumulatedOutgoing(
 			.time = (animation.startedAt - firstStartedAt) / 1000.,
 		});
 	}
-	if (bunch.interactions.empty()) {
+	if (bunch.interactions.empty() || Mwtk::GhostActive()) {
 		return;
 	}
 	const auto peer = item->history()->peer;
@@ -474,7 +476,8 @@ void EmojiInteractions::playStarted(not_null<PeerData*> peer, QString emoji) {
 	auto &map = _playStarted[peer];
 	const auto i = map.find(emoji);
 	const auto now = crl::now();
-	if (i != end(map) && now - i->second < kAccumulateSeenRequests) {
+	if ((i != end(map) && now - i->second < kAccumulateSeenRequests)
+		|| Mwtk::GhostActive()) {
 		return;
 	}
 	_session->api().request(MTPmessages_SetTyping(

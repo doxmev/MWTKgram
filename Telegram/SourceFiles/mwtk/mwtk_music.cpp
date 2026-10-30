@@ -1492,7 +1492,7 @@ void Show(not_null<Window::SessionController*> controller) {
 				st::boxRowPadding);
 			if (Playlists::List(session).empty()) {
 				addLabel(Utf("Найди песню через поиск сверху и добавь её «+», "
-					"или нажми правой кнопкой на трек в чате → «В плейлист MWTK…»."));
+					"или нажми правой кнопкой на трек в чате → «В плейлист RASPIgram…»."));
 			}
 			box->clearButtons();
 			box->addButton(rpl::single(Utf("Закрыть")), [=] { box->closeBox(); });

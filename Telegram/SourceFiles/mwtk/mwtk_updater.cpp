@@ -1,5 +1,5 @@
 /*
-This file is part of MWTKgram, a Telegram Desktop based client.
+This file is part of RASPIgram, a Telegram Desktop based client.
 
 For license and copyright information please follow this link:
 https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
@@ -32,8 +32,8 @@ namespace Mwtk::Updater {
 namespace {
 
 constexpr auto kReleasesUrl
-	= "https://api.github.com/repos/doxmev/MWTKgram/releases?per_page=20";
-constexpr auto kInstallerName = "MWTKgram-Setup.exe";
+	= "https://api.github.com/repos/doxmev/RASPIgram/releases?per_page=20";
+constexpr auto kInstallerName = "RASPIgram-Setup.exe";
 constexpr auto kFirstCheckDelay = crl::time(20 * 1000);
 constexpr auto kCheckPeriod = crl::time(6 * 60 * 60 * 1000);
 
@@ -67,7 +67,7 @@ struct State {
 	auto request = QNetworkRequest(url);
 	request.setHeader(
 		QNetworkRequest::UserAgentHeader,
-		u"MWTKgram-Updater"_q);
+		u"RASPIgram-Updater"_q);
 	request.setAttribute(
 		QNetworkRequest::RedirectPolicyAttribute,
 		QNetworkRequest::NoLessSafeRedirectPolicy);
@@ -153,7 +153,7 @@ void Download(Found found) {
 		const auto folder = QStandardPaths::writableLocation(
 			QStandardPaths::TempLocation);
 		const auto path = folder
-			+ u"/MWTKgram-Setup-%1.exe"_q.arg(found.build);
+			+ u"/RASPIgram-Setup-%1.exe"_q.arg(found.build);
 		auto file = QFile(path);
 		if (!file.open(QIODevice::WriteOnly)
 			|| file.write(bytes) != bytes.size()) {
@@ -176,7 +176,7 @@ void Offer(Found found) {
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			QString::fromUtf8(
-				"Доступна новая версия MWTKgram (сборка %1, у тебя %2).\n\n"
+				"Доступна новая версия RASPIgram (сборка %1, у тебя %2).\n\n"
 				"Установщик скачается, обновит клиент и запустит его снова. "
 				"Чаты и вход в аккаунт сохранятся."
 			).arg(found.build).arg(CurrentBuild()),

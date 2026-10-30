@@ -519,7 +519,7 @@ Widget::Widget(
 		| Qt::Tool);
 	setAttribute(Qt::WA_MacAlwaysShowToolWindow);
 	if (Mwtk::Notify::Current() != Mwtk::Notify::Style::Plain) {
-		// MWTKgram: rounded cards need a translucent window.
+		// RASPIgram: rounded cards need a translucent window.
 		setAttribute(Qt::WA_TranslucentBackground);
 	} else {
 		setAttribute(Qt::WA_OpaquePaintEvent);
@@ -1062,7 +1062,7 @@ void Notification::updateNotifyDisplay() {
 				: TextWithEntities{ name };
 		};
 		auto title = options.hideNameAndPhoto
-			? TextWithEntities{ u"MWTKgram"_q }
+			? TextWithEntities{ u"RASPIgram"_q }
 			: reminder
 			? tr::lng_notification_reminder(tr::now, tr::marked)
 			: topicWithChat();

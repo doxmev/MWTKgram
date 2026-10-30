@@ -323,7 +323,7 @@ void ShowBox(
 		if (!shown) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
-				rpl::single(Utf("Пока ничего не удалялось. MWTKgram сохраняет "
+				rpl::single(Utf("Пока ничего не удалялось. RASPIgram сохраняет "
 					"сообщения, которые удаляются, пока клиент открыт.")),
 				st::boxDividerLabel));
 		}

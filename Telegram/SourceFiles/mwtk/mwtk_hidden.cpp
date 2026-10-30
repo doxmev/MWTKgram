@@ -164,7 +164,7 @@ void AskNewPassword(
 		box->addRow(object_ptr<Ui::FlatLabel>(
 			box,
 			rpl::single(Utf("Скрытые чаты исчезнут из списка. Открыть их можно "
-				"кнопкой «Скрытые» в боковой панели папок, в настройках MWTKgram "
+				"кнопкой «Скрытые» в боковой панели папок, в настройках RASPIgram "
 				"или сочетанием Ctrl+Shift+L.")),
 			st::boxDividerLabel));
 		const auto first = AddPasswordRow(box, Utf("Новый пароль"));
@@ -243,7 +243,7 @@ void ShowList(not_null<Window::SessionController*> controller) {
 			box->addRow(object_ptr<Ui::FlatLabel>(
 				box,
 				rpl::single(Utf("Здесь пусто. Чтобы скрыть чат, нажми на него "
-					"правой кнопкой → «Скрыть чат (MWTK)».")),
+					"правой кнопкой → «Скрыть чат (RASPIgram)».")),
 				st::boxDividerLabel));
 		}
 		for (const auto serialized : set) {

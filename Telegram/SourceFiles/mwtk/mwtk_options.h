@@ -86,6 +86,19 @@ extern const char kOptionFlyby[];
 extern const char kOptionFlybyFavorites[];
 extern const char kOptionHoloProfile[];
 extern const char kOptionQuickPhrases[];
+extern const char kOptionWatermarkText[];
+extern const char kOptionGhost[];
+extern const char kOptionAiProvider[];
+extern const char kOptionAiKey[];
+extern const char kOptionAiModel[];
+extern const char kOptionAiUrl[];
+extern const char kOptionWeather[];
+extern const char kOptionWeatherCity[];
+extern const char kOptionWeatherTime[];
+extern const char kOptionWeatherShown[];
+
+// RASPIgram ghost mode: no read marks, no typing, always offline.
+[[nodiscard]] bool GhostActive();
 
 inline constexpr auto kCustomPaletteIndex = 7;
 

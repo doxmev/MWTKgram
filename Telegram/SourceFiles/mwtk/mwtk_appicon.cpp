@@ -17,8 +17,8 @@ namespace Mwtk::AppIcon {
 QString Name(int index) {
 	switch (index) {
 	case 1: return QString::fromUtf8("Кровавый куб");
-	case 2: return QString::fromUtf8("Глаз MWTK");
-	case 3: return QString::fromUtf8("MWTKgram неон");
+	case 2: return QString::fromUtf8("Глаз RASPIgram");
+	case 3: return QString::fromUtf8("RASPIgram неон");
 	}
 	return QString::fromUtf8("Классическая M");
 }

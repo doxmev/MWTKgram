@@ -133,7 +133,7 @@ void ShowEditBox(
 		not_null<Window::SessionController*> controller,
 		not_null<PeerData*> peer) {
 	controller->show(Box([=](not_null<Ui::GenericBox*> box) {
-		box->setTitle(rpl::single(QString::fromUtf8("Заметка MWTK")));
+		box->setTitle(rpl::single(QString::fromUtf8("Заметка RASPIgram")));
 		box->setWidth(st::boxWideWidth);
 		const auto field = box->addRow(object_ptr<Ui::InputField>(
 			box,
