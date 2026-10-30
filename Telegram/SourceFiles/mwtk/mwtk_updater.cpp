@@ -32,7 +32,7 @@ namespace Mwtk::Updater {
 namespace {
 
 constexpr auto kReleasesUrl
-	= "https://api.github.com/repos/doxmev/RASPIgram/releases?per_page=20";
+	= "https://api.github.com/repos/doxmev/MWTKgram/releases?per_page=60";
 constexpr auto kInstallerName = "RASPIgram-Setup.exe";
 constexpr auto kFirstCheckDelay = crl::time(20 * 1000);
 constexpr auto kCheckPeriod = crl::time(6 * 60 * 60 * 1000);
@@ -89,7 +89,8 @@ void Toast(const QString &text) {
 			continue;
 		}
 		const auto tag = release.value(u"tag_name"_q).toString();
-		if (!tag.startsWith(u"build-"_q)) {
+		// RASPIgram releases live next to MWTKgram ones, tagged raspi-N.
+		if (!tag.startsWith(u"raspi-"_q)) {
 			continue;
 		}
 		const auto build = tag.mid(6).toInt();

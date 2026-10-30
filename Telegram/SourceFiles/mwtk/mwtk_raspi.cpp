@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "api/api_common.h"
 #include "apiwrap.h"
+#include "base/options.h"
 #include "base/timer.h"
 #include "base/unixtime.h"
 #include "core/application.h"
@@ -20,7 +21,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/fields/input_field.h"
-#include "ui/widgets/fields/password_input.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_controller.h"
@@ -43,6 +43,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtNetwork/QNetworkAccessManager>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
+#include <QtWidgets/QMenu>
 
 namespace Mwtk::Raspi {
 namespace {
@@ -782,7 +783,7 @@ void ShowAiSettings(not_null<Window::SessionController*> controller) {
 					"Ключ хранится только на этом компьютере, "
 					"запросы идут напрямую в сервис и оплачиваются с этого ключа.")),
 			st::boxDividerLabel));
-		const auto key = box->addRow(object_ptr<Ui::PasswordInput>(
+		const auto key = box->addRow(object_ptr<Ui::InputField>(
 			box,
 			st::defaultInputField,
 			rpl::single(Utf("API-ключ")),
