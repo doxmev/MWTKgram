@@ -338,7 +338,7 @@ jobs:
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\Release
           mkdir artifact
-          move %OUT%\Telegram.exe artifact\MWTKgram.exe
+          move %OUT%\Telegram.exe artifact\RASPIgram.exe
 
       - name: Build installer.
         shell: pwsh
@@ -351,7 +351,7 @@ jobs:
           $script = "$env:TBUILD\$env:REPO_NAME\Telegram\build\mwtk\setup.iss"
           & $iscc "/DAppVersion=${{ github.run_number }}" "/DSourceDir=$PWD\artifact" "/DOutputDir=$PWD\installer" $script
           if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-          Copy-Item installer\MWTKgram-Setup.exe artifact\MWTKgram-Setup.exe
+          Copy-Item installer\RASPIgram-Setup.exe artifact\RASPIgram-Setup.exe
       - uses: actions/upload-artifact@v7
         name: Upload artifact.
         with:
