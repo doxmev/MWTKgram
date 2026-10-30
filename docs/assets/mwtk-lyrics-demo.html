@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MWTK Lyrics Demo</title>
+<style>
+  :root { --bg:#0b0204; --accent:#ff2a3a; --text:#ffe9ec; --muted:#b07d84; --panel:rgba(36,4,9,.72); }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--text);
+    font-family: "Segoe UI", system-ui, sans-serif; overflow:hidden; }
+  canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+  .bar { position:fixed; left:16px; right:16px; bottom:16px; display:flex; gap:12px; align-items:center;
+    background:var(--panel); border:1px solid rgba(255,42,58,.3); border-radius:14px; padding:10px 14px;
+    backdrop-filter: blur(8px); }
+  button { background:var(--accent); color:#fff; border:0; border-radius:10px; padding:8px 14px;
+    font-weight:700; cursor:pointer; font-size:14px; }
+  button.ghost { background:transparent; border:1px solid rgba(255,42,58,.5); }
+  .track { flex:1; min-width:0; }
+  .title { font-size:13px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .prog { height:4px; background:rgba(255,255,255,.12); border-radius:4px; margin-top:6px; overflow:hidden; }
+  .prog i { display:block; height:100%; width:0; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  .time { font-variant-numeric: tabular-nums; font-size:13px; color:var(--muted); }
+  .panel { position:fixed; right:16px; bottom:84px; width:min(320px, calc(100% - 32px)); background:var(--panel);
+    border:1px solid rgba(255,42,58,.3); border-radius:14px; padding:14px; backdrop-filter: blur(10px);
+    display:grid; gap:12px; font-size:14px; }
+  .panel[hidden] { display:none; }
+  .panel h3 { margin:0; font-size:15px; }
+  .row { display:grid; gap:6px; }
+  .row label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .seg { display:flex; flex-wrap:wrap; gap:6px; }
+  .seg button { background:transparent; border:1px solid rgba(255,42,58,.45); padding:6px 10px; font-weight:600; font-size:13px; }
+  .seg button.on { background:var(--accent); border-color:var(--accent); }
+  .toggle { display:flex; justify-content:space-between; align-items:center; }
+  input[type=range] { width:100%; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="panel" id="panel" hidden>
+  <h3>Настройки текста песни</h3>
+  <div class="row"><label>Расположение</label>
+    <div class="seg" data-key="layout">
+      <button data-v="scatter" class="on">По словам</button>
+      <button data-v="cascade">Лесенка</button>
+      <button data-v="line">Строкой</button>
+    </div></div>
+  <div class="row"><label>Как пропадает</label>
+    <div class="seg" data-key="vanish">
+      <button data-v="particles" class="on">Искры</button>
+      <button data-v="fade">Растворение</button>
+      <button data-v="fly">Улетает вверх</button>
+    </div></div>
+  <div class="row"><label>Стиль</label>
+    <div class="seg" data-key="style">
+      <button data-v="neon" class="on">Неон</button>
+      <button data-v="d3">3D</button>
+      <button data-v="pixel">Пиксели</button>
+    </div></div>
+  <div class="row"><label>Движение слов</label>
+    <input type="range" id="motion" min="0" max="100" value="60"></div>
+  <div class="row"><label>Размер</label>
+    <input type="range" id="size" min="60" max="140" value="100"></div>
+</div>
+
+<div class="bar">
+  <button id="play">▶ Заново</button>
+  <div class="track">
+    <div class="title">Демо: текст с таймингами (как будет из .lrc)</div>
+    <div class="prog"><i id="p"></i></div>
+  </div>
+  <span class="time" id="t">0:00</span>
+  <button class="ghost" id="gear">⚙</button>
+</div>
+
+<script>
+// Placeholder lines with timings in seconds, the same shape an .lrc file gives.
+const LINES = [
+  { t: 0.4, end: 3.0, text: "Это строчка номер один" },
+  { t: 3.2, end: 5.8, text: "слова загораются в такт" },
+  { t: 6.0, end: 8.6, text: "и встают по своим местам" },
+  { t: 8.8, end: 11.6, text: "а потом пропадают по очереди" },
+  { t: 11.8, end: 14.8, text: "MWTKgram · doxmev" },
+];
+const DURATION = 15.2;
+const S = { layout: "scatter", vanish: "particles", style: "neon", motion: 0.6, size: 1 };
+
+document.querySelectorAll(".seg").forEach(seg => seg.addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b));
+  S[seg.dataset.key] = b.dataset.v; restart();
+}));
+document.getElementById("motion").oninput = e => { S.motion = e.target.value / 100; };
+document.getElementById("size").oninput = e => { S.size = e.target.value / 100; restart(); };
+const panel = document.getElementById("panel");
+document.getElementById("gear").onclick = () => { panel.hidden = !panel.hidden; };
+
+const cv = document.getElementById("c"), cx = cv.getContext("2d");
+const off = document.createElement("canvas"), ox = off.getContext("2d", { willReadFrequently: true });
+let W, H, DPR;
+function resize() {
+  DPR = Math.min(2, window.devicePixelRatio || 1);
+  W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  restart();
+}
+
+function rng(seed) { return () => (seed = (seed * 16807) % 2147483647) / 2147483647; }
+function baseSize() { return Math.max(22, Math.min(60, W / 15)) * S.size; }
+function font(sz) { return S.style === "pixel" ? `700 ${sz}px monospace` : `800 ${sz}px "Segoe UI", system-ui, sans-serif`; }
+
+// Word timings: line duration split by word length (when the .lrc has only line times).
+function timeWords(line) {
+  const words = line.text.split(" ");
+  const total = words.reduce((a, w) => a + w.length + 1, 0);
+  let acc = line.t; const span = (line.end - line.t) * 0.8;
+  return words.map(w => { const s = acc; acc += span * (w.length + 1) / total; return { w, s, e: acc }; });
+}
+
+// Places every word: a loose cluster around a point that moves from line to line.
+function layoutLine(line, index) {
+  const r = rng(1000 + index * 77);
+  const words = timeWords(line);
+  const sz = baseSize();
+  cx.font = font(sz);
+  const center = S.layout === "line"
+    ? { x: W / 2, y: H * 0.42 }
+    : { x: W * (0.5 + (r() - .5) * 0.25), y: H * (0.40 + (r() - .5) * 0.18) };
+  if (S.layout === "line") {
+    const full = cx.measureText(line.text).width;
+    let x = center.x - full / 2;
+    for (const w of words) {
+      w.size = sz; w.rot = 0; w.x = x + cx.measureText(w.w).width / 2; w.y = center.y;
+      x += cx.measureText(w.w + " ").width;
+    }
+  } else if (S.layout === "cascade") {
+    let x = 0, y = 0, widths = [];
+    for (const w of words) {
+      w.size = sz * (0.85 + r() * 0.35); cx.font = font(w.size);
+      const ww = cx.measureText(w.w).width;
+      w.x = x + ww / 2; w.y = y; w.rot = (r() - .5) * 0.08;
+      x += ww * 0.55 + sz * 0.5; y += sz * 0.62;
+      widths.push(w.x + ww / 2);
+    }
+    const mx = Math.max(...widths) / 2, my = y / 2;
+    for (const w of words) { w.x += center.x - mx; w.y += center.y - my; }
+  } else {
+    // "По словам": rows of 1-3 words, each word nudged up/down and tilted a little.
+    let rows = [], cur = [];
+    for (const w of words) { cur.push(w); if (cur.length >= 1 + Math.floor(r() * 3)) { rows.push(cur); cur = []; } }
+    if (cur.length) rows.push(cur);
+    const rowH = sz * 1.25;
+    rows.forEach((row, ri) => {
+      let widths = row.map(w => { w.size = sz * (0.8 + r() * 0.5); cx.font = font(w.size); return cx.measureText(w.w).width; });
+      const gap = sz * 0.45;
+      const total = widths.reduce((a, b) => a + b, 0) + gap * (row.length - 1);
+      let x = -total / 2 + (r() - .5) * sz * 2;
+      row.forEach((w, i) => {
+        w.x = center.x + x + widths[i] / 2;
+        w.y = center.y + (ri - (rows.length - 1) / 2) * rowH + (r() - .5) * sz * 0.5;
+        w.rot = (r() - .5) * 0.22;
+        x += widths[i] + gap;
+      });
+    });
+  }
+  for (const w of words) {
+    const a = r() * Math.PI * 2;
+    w.fromX = Math.cos(a) * sz * 3; w.fromY = Math.sin(a) * sz * 2;   // each word flies in from its own side
+    w.phase = r() * 6.28; w.gone = false;
+    w.out = line.end + (S.layout === "line" ? 0 : (words.indexOf(w) / words.length) * 0.35); // vanish one by one
+  }
+  return words;
+}
+
+let laid = [], particles = [], start = performance.now();
+function restart() { start = performance.now(); particles = []; laid = LINES.map(layoutLine); }
+document.getElementById("play").onclick = restart;
+addEventListener("resize", resize); resize();
+
+const labels = Array.from({ length: 10 }, (_, i) => ({
+  x: Math.random(), y: Math.random(), s: 12 + Math.random() * 22,
+  v: 0.01 + Math.random() * 0.02, r: (Math.random() - .5) * .4, txt: i % 3 ? "doxmev" : "MWTK",
+}));
+
+function drawWord(ctx, w, x, y, alpha, lit, time) {
+  ctx.save();
+  ctx.translate(x, y); ctx.rotate(w.rot);
+  ctx.font = font(w.size); ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  const width = ctx.measureText(w.w).width;
+  const left = -width / 2;
+  if (S.style === "d3") {
+    for (let d = 6; d > 0; d--) { ctx.globalAlpha = alpha * 0.5; ctx.fillStyle = "#5a000a"; ctx.fillText(w.w, left + d, d); }
+  }
+  ctx.globalAlpha = alpha; ctx.fillStyle = "rgba(255,233,236,.28)"; ctx.fillText(w.w, left, 0);
+  if (lit > 0) {
+    if (S.style !== "pixel") { ctx.shadowColor = "#ff2a3a"; ctx.shadowBlur = 22; }
+    let px = left;
+    for (let i = 0; i < w.w.length; i++) {
+      const ch = w.w[i], cw = ctx.measureText(ch).width;
+      const a = Math.max(0, Math.min(1, lit * w.w.length - i));
+      if (a > 0) { ctx.globalAlpha = alpha * a; ctx.fillStyle = "#ffd7dc"; ctx.fillText(ch, px, 0); }
+      px += cw;
+    }
+  }
+  ctx.restore();
+  return width;
+}
+
+function shatterWord(w, x, y) {
+  const pad = w.size;
+  const width = (ox.font = font(w.size), ox.measureText(w.w).width) + pad * 2;
+  off.width = Math.ceil(width); off.height = Math.ceil(w.size * 2.4);
+  ox.clearRect(0, 0, off.width, off.height);
+  ox.save(); ox.translate(off.width / 2, off.height / 2); ox.rotate(w.rot);
+  ox.font = font(w.size); ox.textAlign = "center"; ox.textBaseline = "middle"; ox.fillStyle = "#fff";
+  ox.fillText(w.w, 0, 0); ox.restore();
+  const data = ox.getImageData(0, 0, off.width, off.height).data;
+  const step = S.style === "pixel" ? 4 : 3;
+  for (let yy = 0; yy < off.height; yy += step)
+    for (let xx = 0; xx < off.width; xx += step)
+      if (data[(yy * off.width + xx) * 4 + 3] > 128 && Math.random() < 0.6)
+        particles.push({ x: x - off.width / 2 + xx, y: y - off.height / 2 + yy,
+          vx: (Math.random() - .5) * 3, vy: -Math.random() * 2.2 - .3, life: 1, s: step * (0.6 + Math.random() * .6) });
+}
+
+function frame(now) {
+  const time = (now - start) / 1000;
+  if (time > DURATION + 1.8) restart();
+  cx.clearRect(0, 0, W, H);
+  const g = cx.createRadialGradient(W * .5, H * .45, 10, W * .5, H * .5, Math.max(W, H) * .8);
+  g.addColorStop(0, "#2a0509"); g.addColorStop(1, "#070102");
+  cx.fillStyle = g; cx.fillRect(0, 0, W, H);
+
+  cx.textAlign = "center"; cx.textBaseline = "middle";
+  for (const l of labels) {
+    l.y -= l.v / 60; if (l.y < -.1) l.y = 1.1;
+    cx.save(); cx.translate(l.x * W, l.y * H); cx.rotate(l.r);
+    cx.font = `700 ${l.s}px "Segoe UI", sans-serif`; cx.fillStyle = "rgba(255,42,58,.10)";
+    cx.fillText(l.txt, 0, 0); cx.restore();
+  }
+
+  const m = S.motion;
+  laid.forEach((words, li) => {
+    const line = LINES[li];
+    for (const w of words) {
+      if (w.gone) continue;
+      const appear = w.s - 0.45;
+      if (time < appear) continue;
+      // fly in from its own direction
+      const k = Math.min(1, (time - appear) / 0.55), ease = 1 - Math.pow(1 - k, 3);
+      // gentle float while it is on screen
+      const fx = Math.sin(time * 0.9 + w.phase) * 6 * m + (time - line.t) * 3 * m * Math.cos(w.phase);
+      const fy = Math.cos(time * 1.1 + w.phase) * 5 * m - (time - line.t) * 2 * m;
+      let x = w.x + w.fromX * (1 - ease) + fx;
+      let y = w.y + w.fromY * (1 - ease) + fy;
+      let alpha = ease;
+      const lit = Math.max(0, Math.min(1, (time - w.s) / Math.max(.05, w.e - w.s)));
+      if (time >= w.out) {
+        const v = Math.min(1, (time - w.out) / 0.6);
+        if (S.vanish === "particles") { shatterWord(w, x, y); w.gone = true; continue; }
+        if (S.vanish === "fade") { alpha *= 1 - v; cx.filter = `blur(${v * 6}px)`; }
+        if (S.vanish === "fly") { alpha *= 1 - v; y -= v * v * 120; x += Math.cos(w.phase) * v * 30; }
+        if (v >= 1) { w.gone = true; cx.filter = "none"; continue; }
+      }
+      drawWord(cx, w, x, y, alpha, lit, time);
+      cx.filter = "none";
+    }
+  });
+
+  particles = particles.filter(p => p.life > 0);
+  for (const p of particles) {
+    p.x += p.vx; p.y += p.vy; p.vy += 0.07; p.vx *= 0.99; p.life -= 0.013;
+    cx.fillStyle = `rgba(255,${60 + 120 * p.life | 0},${70 + 80 * p.life | 0},${p.life})`;
+    cx.fillRect(p.x, p.y, p.s, p.s);
+  }
+
+  const tt = Math.min(time, DURATION);
+  document.getElementById("p").style.width = (tt / DURATION * 100) + "%";
+  document.getElementById("t").textContent = `0:${String(Math.floor(tt)).padStart(2, "0")}`;
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

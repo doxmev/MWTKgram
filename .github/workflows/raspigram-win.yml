@@ -1,0 +1,367 @@
+name: RASPIgram Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+concurrency:
+  group: raspigram-win-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+
+  windows:
+    name: Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 360
+
+    strategy:
+      matrix:
+        arch: [x64]
+        qt: [qt6]
+        generator: [""]
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          if exist D:\ (set "TBUILD_REAL=D:\TBuild") else (set "TBUILD_REAL=%userprofile%\TBuild")
+          mkdir %TBUILD_REAL%\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %TBUILD_REAL%
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries${{ matrix.arch == 'x64' && '\win64' || '' }}>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone.
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          echo "Configurate git for cherry-picks."
+          git config --global user.email "you@example.com"
+          git config --global user.name "Sample"
+
+      - name: Install VS 2026 Build Tools.
+        if: matrix.arch == 'arm64'
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'vs_buildtools.exe'
+          Invoke-WebRequest -Uri https://aka.ms/vs/18/stable/vs_buildtools.exe -OutFile $exe
+          $p = Start-Process -FilePath $exe -Wait -PassThru -ArgumentList `
+            '--quiet','--wait','--norestart','--nocache', `
+            '--add','Microsoft.VisualStudio.Workload.VCTools', `
+            '--add','Microsoft.VisualStudio.Component.VC.Tools.ARM64', `
+            '--add','Microsoft.VisualStudio.Component.VC.ATL.ARM64'
+          Remove-Item $exe -Force -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0 -and $p.ExitCode -ne 3010) { exit $p.ExitCode }
+
+      - uses: Eden-CI/msvc-dev-cmd@master
+        name: Native Tools Command Prompt.
+        with:
+          arch: ${{ matrix.arch }}
+          sdk: ${{ env.SDK }}
+          toolset: ${{ case(matrix.arch == 'arm64', '', '14.44') }}
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: ThirdParty cache.
+        id: cache-third-party
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ runner.arch }}-third-party-
+
+      - name: Libraries cache.
+        id: cache-libs
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-v1-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-
+
+      - name: Qt cache.
+        id: cache-qt
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-
+
+      - name: Libraries.
+        run: |
+          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }} > %TBUILD%\libraries.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
+
+      - name: Rebuild pruned Rust bindings.
+        run: |
+          if exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 0
+          call %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent ${{ matrix.qt }} tlottie wallet-engine tdesktop_rust || exit /b 1
+          if not exist %LibrariesPath%\tdesktop_rust\out\src\wallet_engine\wallet_engine.cpp exit /b 1
+
+      - name: Read configuration matrix.
+        shell: bash
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          ARTIFACT_NAME="RASPIgram"
+
+          ARCH=""
+          if [ -n "${{ matrix.arch }}" ]; then
+            case "${{ matrix.arch }}" in
+              x64_x86) ARCH="x86";;
+              arm64) ARCH="arm";;
+              *) ARCH="${{ matrix.arch }}";;
+            esac
+            echo "Architecture from matrix: $ARCH"
+            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.arch }}"
+          fi
+
+          if [ -n "${{ matrix.qt }}" ]; then
+            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.qt }}"
+          fi
+
+          GENERATOR=""
+          if [ -n "${{ matrix.generator }}" ]; then
+            GENERATOR="-G \"${{ matrix.generator }}\""
+            echo "Generator from matrix: $GENERATOR"
+            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.generator }}"
+          fi
+          echo "TDESKTOP_BUILD_GENERATOR=$GENERATOR" >> $GITHUB_ENV
+
+          [ -n "$GENERATOR" ] && ARCH=""
+          echo "TDESKTOP_BUILD_ARCH=$ARCH" >> $GITHUB_ENV
+
+          DEFINE=""
+          if [ -n "${{ matrix.defines }}" ]; then
+            DEFINE="-D ${{ matrix.defines }}=ON"
+            echo "Define from matrix: $DEFINE"
+            ARTIFACT_NAME="${ARTIFACT_NAME} ${{ matrix.defines }}"
+          fi
+          echo "TDESKTOP_BUILD_DEFINE=$DEFINE" >> $GITHUB_ENV
+
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+
+          API_ID="$(printf '%s' "$TG_API_ID" | tr -d '[:space:]')"
+          API_HASH="$(printf '%s' "$TG_API_HASH" | tr -d '[:space:]')"
+          API_ID="${API_ID#TG_API_ID=}"
+          API_HASH="${API_HASH#TG_API_HASH=}"
+          if ! [[ "$API_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Secret TG_API_ID must contain only digits (api_id from my.telegram.org)."
+            exit 1
+          fi
+          if ! [[ "$API_HASH" =~ ^[0-9a-fA-F]{32}$ ]]; then
+            echo "::error::Secret TG_API_HASH must be 32 hex characters (api_hash from my.telegram.org)."
+            exit 1
+          fi
+          echo "::add-mask::$API_ID"
+          echo "::add-mask::$API_HASH"
+          echo "TDESKTOP_BUILD_API=-D TDESKTOP_API_ID=$API_ID -D TDESKTOP_API_HASH=$API_HASH" >> $GITHUB_ENV
+
+      - name: Free up some disk space.
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -name '*.pc' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' -o -path '*/nv-codec-headers/*' -o -path '*/tdesktop_rust/out/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Save ThirdParty cache now.
+        if: steps.cache-third-party.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-${{ runner.arch }}-third-party-${{ env.CACHE_KEY }}
+
+      - name: Save Libraries cache now.
+        if: steps.cache-libs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-libs-rel-v1-${{ env.CACHE_KEY }}
+
+      - name: Save Qt cache now.
+        if: steps.cache-qt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-${{ matrix.arch }}-${{ matrix.qt || 'qt' }}-rel-${{ env.CACHE_KEY }}
+
+      - name: Free disk space for the build.
+        shell: pwsh
+        run: |
+          function Report($label) {
+            $parts = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Free -gt 0 } | ForEach-Object { "{0}: {1:N1} GB free" -f $_.Name, ($_.Free / 1GB) }
+            Write-Output ("::notice title=Disk {0}::{1}" -f $label, ($parts -join ', '))
+          }
+          Report "before"
+          $targets = @(
+            'C:\Android',
+            'C:\Program Files (x86)\Android',
+            'C:\hostedtoolcache\windows\CodeQL',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\ghcup',
+            'C:\Program Files\Microsoft SDKs\Azure',
+            'C:\Program Files\Azure Cosmos DB Emulator',
+            'C:\SeleniumWebDrivers',
+            'C:\tools\php'
+          )
+          foreach ($t in $targets) {
+            if (Test-Path $t) { cmd /c "rmdir /s /q `"$t`"" 2>$null }
+          }
+          $out = Join-Path $env:TBUILD (Join-Path $env:REPO_NAME 'out')
+          $d = Get-PSDrive -Name D -ErrorAction SilentlyContinue
+          $c = Get-PSDrive -Name C
+          if ($d -and $d.Free -gt $c.Free -and -not (Test-Path $out)) {
+            New-Item -ItemType Directory -Force -Path 'D:\mwtk_out' | Out-Null
+            cmd /c "mklink /J `"$out`" D:\mwtk_out"
+            Write-Output "::notice title=Build dir::out is on drive D"
+          }
+          Report "after"
+
+      - name: Configure pagefile.
+        uses: al-cheb/configure-pagefile-action@v1.4
+        with:
+          minimum-size: 16GB
+          maximum-size: 48GB
+          disk-root: "D:"
+
+      - name: Stamp build number.
+        if: env.ONLY_CACHE == 'false'
+        shell: bash
+        run: |
+          ROOT="$(cygpath -u "$TBUILD")/$REPO_NAME"
+          printf '#pragma once\n#define MWTK_BUILD_NUMBER %s\n' "${{ github.run_number }}" > "$ROOT/Telegram/SourceFiles/mwtk/mwtk_build.h"
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat ^
+          %TDESKTOP_BUILD_GENERATOR% ^
+          %TDESKTOP_BUILD_ARCH% ^
+          ${{ matrix.qt }} ^
+          %TDESKTOP_BUILD_API% ^
+          -D CMAKE_CONFIGURATION_TYPES=Release ^
+          -D CMAKE_MSVC_DEBUG_INFORMATION_FORMAT= ^
+          -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON ^
+          -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON ^
+          %TDESKTOP_BUILD_DEFINE% > %TBUILD%\configure.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
+
+          cmake --build ..\out --config Release --parallel 2 > %TBUILD%\build.log 2>&1
+          if %errorlevel% neq 0 exit /b 1
+
+      - name: Report build errors.
+        if: failure()
+        shell: bash
+        run: |
+          ROOT="$(cygpath -u "$TBUILD")"
+          : > errors.txt
+          if [ -f "$ROOT/libraries.log" ] && [ ! -f "$ROOT/configure.log" ]; then
+            df -h 2>/dev/null | tr -d '\r' | grep -E "^[A-Z]:|/c|/d" | head -4 >> errors.txt || true
+            grep -aE "FAILED|BUILDING:|fatal error|error C[0-9]+|error LNK[0-9]+|error MSB[0-9]+|No space|not enough space" "$ROOT/libraries.log" | tr -d '\r' | tail -n 30 >> errors.txt || true
+            echo "----- tail -----" >> errors.txt
+            tail -n 60 "$ROOT/libraries.log" | tr -d '\r' >> errors.txt
+          fi
+          for LOG in "$ROOT/configure.log" "$ROOT/build.log"; do
+            [ -f "$LOG" ] || continue
+            grep -aE "error C[0-9]+|error LNK[0-9]+|fatal error|CMake Error|error MSB[0-9]+|: error |Error:" "$LOG" | tr -d '\r' | sort -u | head -40 >> errors.txt || true
+          done
+          if [ ! -s errors.txt ]; then
+            for LOG in "$ROOT/configure.log" "$ROOT/build.log"; do
+              [ -f "$LOG" ] && tail -n 40 "$LOG" | tr -d '\r' >> errors.txt
+            done
+          fi
+          [ -s errors.txt ] || echo "No build logs were produced." > errors.txt
+          head -n 110 errors.txt > errors_cut.txt
+          split -l 12 errors_cut.txt chunk_
+          for CHUNK in chunk_*; do
+            MESSAGE="$(sed -e 's/%/%25/g' "$CHUNK" | awk 'BEGIN{ORS="%0A"} {print}')"
+            echo "::error title=Build log::$MESSAGE"
+          done
+
+      - name: Move artifact.
+        run: |
+          set OUT=%TBUILD%\%REPO_NAME%\out\Release
+          mkdir artifact
+          move %OUT%\Telegram.exe artifact\RASPIgram.exe
+
+      - name: Build installer.
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+          }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found" }
+          $script = "$env:TBUILD\$env:REPO_NAME\Telegram\build\mwtk\setup.iss"
+          & $iscc "/DAppVersion=${{ github.run_number }}" "/DSourceDir=$PWD\artifact" "/DOutputDir=$PWD\installer" $script
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Copy-Item installer\RASPIgram-Setup.exe artifact\RASPIgram-Setup.exe
+      - uses: actions/upload-artifact@v7
+        name: Upload artifact.
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact\
+          retention-days: 14
+
+      - name: Publish release.
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "build-${{ github.run_number }}"
+          Compress-Archive -Path artifact\RASPIgram.exe -DestinationPath RASPIgram-x64.zip -Force
+          gh release create $tag installer\RASPIgram-Setup.exe RASPIgram-x64.zip --repo "${{ github.repository }}" --target "${{ github.sha }}" --title "RASPIgram (build ${{ github.run_number }})" --notes "Windows x64 build of commit ${{ github.sha }}. RASPIgram-Setup.exe installs the client and updates it later from inside the app; the zip is the portable version." --latest

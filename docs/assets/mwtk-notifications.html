@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MWTK Notifications</title>
+<style>
+  :root { --bg:#0b0204; --text:#ffe9ec; --muted:#b07d84; --accent:#ff2a3a; }
+  body { margin:0; background:radial-gradient(circle at 70% 20%, #2a0509, #070102 70%); color:var(--text);
+    font-family:"Segoe UI",system-ui,sans-serif; padding:24px 16px 40px; min-height:100vh; box-sizing:border-box; }
+  h1 { font-size:22px; margin:0 0 4px; } p.sub { color:var(--muted); margin:0 0 28px; font-size:14px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:36px 24px; max-width:1150px; }
+  .label { font-size:15px; font-weight:700; margin-bottom:10px; } .label b { color:var(--accent); margin-right:6px; }
+  .label span { display:block; font-weight:400; color:var(--muted); font-size:13px; margin-top:2px; }
+
+  .n { position:relative; display:flex; gap:14px; align-items:center; padding:14px 16px; width:360px; max-width:100%;
+    box-sizing:border-box; animation: in .7s cubic-bezier(.2,.9,.3,1.2) both; }
+  .n .ava { width:52px; height:52px; border-radius:50%; flex:none; display:grid; place-items:center;
+    font-weight:800; font-size:22px; color:#fff; background:linear-gradient(135deg,#ff7a5a,#d8323c); }
+  .n .name { font-weight:700; font-size:15px; } .n .msg { font-size:14px; opacity:.85; margin-top:3px; }
+  .n .x { position:absolute; top:10px; right:12px; opacity:.5; font-size:14px; }
+  @keyframes in { from { transform: translateX(60px) scale(.95); opacity:0; } }
+
+  /* 0: as now */
+  .plain { background:#fff; color:#222; border-radius:0; } .plain .msg { color:#4a6a8a; }
+
+  /* 1: hologram */
+  .holo { border-radius:22px; overflow:hidden; isolation:isolate;
+    background:linear-gradient(135deg, rgba(255,42,58,.18), rgba(120,40,255,.14) 50%, rgba(0,220,255,.14));
+    border:1px solid rgba(255,255,255,.22); backdrop-filter: blur(14px);
+    box-shadow: 0 0 28px rgba(255,42,58,.35), inset 0 0 24px rgba(255,255,255,.06); }
+  .holo::before { content:""; position:absolute; inset:-50%; z-index:-1;
+    background:conic-gradient(from 0deg, transparent, rgba(255,42,58,.25), rgba(0,220,255,.22), rgba(170,80,255,.22), transparent 60%);
+    animation: spin 6s linear infinite; }
+  .holo::after { content:""; position:absolute; inset:0; z-index:-1; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(255,255,255,.05) 0 1px, transparent 1px 4px); animation: scan 3s linear infinite; }
+  .holo .ava { box-shadow:0 0 0 2px rgba(255,255,255,.25), 0 0 18px rgba(255,42,58,.6); }
+  .holo .name { text-shadow:0 0 10px rgba(255,90,110,.8); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes scan { to { background-position: 0 40px; } }
+
+  /* 2: neon card */
+  .neon { border-radius:18px; background:rgba(28,4,8,.86); border:1.5px solid var(--accent);
+    box-shadow:0 0 18px rgba(255,42,58,.55), inset 0 0 18px rgba(255,42,58,.18); }
+  .neon .bar { position:absolute; left:0; top:14px; bottom:14px; width:4px; border-radius:2px; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  .neon .ava { border-radius:14px; }
+
+  /* 3: 3D block */
+  .block { border-radius:16px; background:linear-gradient(180deg,#c8142a,#7a0612); color:#fff;
+    box-shadow: 0 8px 0 #3a0207, 0 14px 24px rgba(0,0,0,.6); transform: perspective(600px) rotateX(8deg) rotateY(-8deg); }
+  .block .ava { border-radius:10px; box-shadow: 0 4px 0 rgba(0,0,0,.35); }
+  .block .msg { opacity:.92; }
+
+  /* phone */
+  .phone { width:360px; max-width:100%; border-radius:28px; padding:14px; box-sizing:border-box; height:220px;
+    background:linear-gradient(180deg,#1a0307,#060102); border:1px solid rgba(255,42,58,.25); position:relative; overflow:hidden; }
+  .phone .n { width:100%; animation: drop .8s cubic-bezier(.2,.9,.3,1.2) both; }
+  .phone .labels { position:absolute; inset:0; color:rgba(255,42,58,.1); font-weight:800; font-size:22px; }
+  .phone .labels span { position:absolute; }
+  @keyframes drop { from { transform: translateY(-80px); opacity:0; } }
+  button.replay { margin-top:28px; background:var(--accent); color:#fff; border:0; border-radius:10px; padding:10px 16px; font-weight:700; cursor:pointer; }
+</style>
+</head>
+<body>
+<h1>Входящие уведомления — варианты</h1>
+<p class="sub">Сообщение-пример. Каждый вариант будет отдельным выбором в настройках MWTKgram.</p>
+<div class="grid" id="g">
+  <div><div class="label"><b>0</b>Как сейчас<span>Обычное окно Telegram Desktop</span></div>
+    <div class="n plain"><div class="ava">A</div><div><div class="name">Андрей</div><div class="msg">привет, как дела?</div></div><div class="x">✕</div></div></div>
+
+  <div><div class="label"><b>1</b>Голограмма<span>Стекло, переливающаяся радужная кромка, линии развёртки</span></div>
+    <div class="n holo"><div class="ava">A</div><div><div class="name">Андрей</div><div class="msg">привет, как дела?</div></div><div class="x">✕</div></div></div>
+
+  <div><div class="label"><b>2</b>Неоновая карточка<span>Тёмная, светящаяся рамка и полоска, аватарка-плитка</span></div>
+    <div class="n neon"><div class="bar"></div><div class="ava">A</div><div><div class="name">Андрей</div><div class="msg">привет, как дела?</div></div><div class="x">✕</div></div></div>
+
+  <div><div class="label"><b>3</b>3D-блок<span>Объёмная плашка в цвет темы, слегка повёрнута</span></div>
+    <div class="n block"><div class="ava">A</div><div><div class="name">Андрей</div><div class="msg">привет, как дела?</div></div><div class="x">✕</div></div></div>
+
+  <div><div class="label"><b>Android</b>Голограмма внутри приложения<span>Всплывает сверху, когда MWTKgram открыт</span></div>
+    <div class="phone"><div class="labels"><span style="left:20px;top:120px">doxmev</span><span style="left:200px;top:170px">MWTK</span><span style="left:160px;top:70px;font-size:14px">doxmev</span></div>
+      <div class="n holo"><div class="ava">A</div><div><div class="name">Андрей</div><div class="msg">привет, как дела?</div></div></div></div></div>
+</div>
+<button class="replay" onclick="document.querySelectorAll('.n').forEach(n=>{n.style.animation='none';n.offsetHeight;n.style.animation=''})">▶ Показать появление ещё раз</button>
+</body>
+</html>
