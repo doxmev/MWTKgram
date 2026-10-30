@@ -204,9 +204,9 @@ private:
 	QColor _linesColor;
 
 	// Rotation in degrees; the card rests slightly turned.
-	static constexpr auto kPlane = 8.;
-	static constexpr auto kRestX = -3.;
-	static constexpr auto kRestY = 5.;
+	static constexpr auto kPlane = 0.;
+	static constexpr auto kRestX = 0.;
+	static constexpr auto kRestY = 0.;
 	double _rx = kRestX;
 	double _ry = kRestY;
 	double _cachedRx = 1000.;
@@ -359,6 +359,10 @@ void WindowLayer::tick() {
 		// Spring back.
 		_rx += (kRestX - _rx) * 0.18;
 		_ry += (kRestY - _ry) * 0.18;
+		if (std::abs(_rx - kRestX) <= 0.05 && std::abs(_ry - kRestY) <= 0.05) {
+			_rx = kRestX;
+			_ry = kRestY;
+		}
 	}
 	// Fresh content often while the mouse is over the profile (scrolling,
 	// hover), rarely when nobody touches it: it is the costly part.
@@ -492,53 +496,20 @@ void WindowLayer::capture() {
 		result.setDevicePixelRatio(ratio);
 		return result;
 	};
-	// One glass plane with the userpic floating a little above it.
-	const auto ring = int(8 * style::Scale() / 100.);
-	const auto avatar = _userpic
-		? QRect(_userpic->mapTo(_section, QPoint()), _userpic->size())
-			.marginsAdded({ ring, ring, ring, ring })
-			.intersected(head)
-		: QRect();
-	auto plane = cut(rect());
-	auto avatarImage = QImage();
-	if (!avatar.isEmpty()) {
-		avatarImage = QImage(
-			avatar.size() * ratio,
-			QImage::Format_ARGB32_Premultiplied);
-		avatarImage.setDevicePixelRatio(ratio);
-		avatarImage.fill(Qt::transparent);
-		auto circle = QPainterPath();
-		circle.addEllipse(QRectF(QPointF(), QSizeF(avatar.size())));
-		{
-			auto q = QPainter(&avatarImage);
-			q.setRenderHint(QPainter::Antialiasing);
-			q.setClipPath(circle);
-			q.drawImage(QPointF(), cut(avatar));
-		}
-		// Where the userpic was, the head color: no hole in the card.
-		const auto sampleAt = QPoint(
-			std::max(avatar.x() - ring * 2, head.x() + 1),
-			avatar.y() + avatar.height() / 2) * ratio;
-		const auto fillColor = QColor::fromRgba(
-			plane.pixel(sampleAt.x(), sampleAt.y()));
-		auto q = QPainter(&plane);
-		q.setRenderHint(QPainter::Antialiasing);
-		q.setCompositionMode(QPainter::CompositionMode_Source);
-		q.setPen(Qt::NoPen);
-		q.setBrush(fillColor);
-		q.drawEllipse(QRectF(avatar).adjusted(-1, -1, 1, 1));
-	}
-	_parts.push_back({ std::move(plane), QRectF(rect()), kPlane });
-	if (!avatarImage.isNull()) {
-		_parts.push_back({ std::move(avatarImage), QRectF(avatar), kPlane + 28. });
-	}
+	// One flat glass plane: at rest it lies exactly over the real widgets,
+	// so a click lands on what is seen.
+	_parts.push_back({ cut(rect()), QRectF(rect()), kPlane });
 	_cacheValid = false;
 }
 
 QPointF WindowLayer::project(QPointF point, double depth) const {
 	const auto scale = style::Scale() / 100.;
 	const auto cx = width() / 2., cy = height() / 2.;
-	const auto shrink = 0.9;
+	// Smaller only while turned, so it fits; at rest exactly in place.
+	const auto turn = std::min(
+		std::max(std::abs(_rx - kRestX), std::abs(_ry - kRestY)) / 20.,
+		1.);
+	const auto shrink = 1. - 0.1 * turn;
 	auto x = (point.x() - cx) * shrink;
 	auto y = (point.y() - cy) * shrink;
 	auto z = depth * scale;

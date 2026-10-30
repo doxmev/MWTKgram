@@ -1388,7 +1388,20 @@ struct Navigation {
 	Fn<void()> mix;
 	Fn<void(QString)> import;
 	Fn<void()> refresh;
+	bool mixFresh = false;
 };
+
+// The last «Мой микс» stays until a new one is asked for: leave the
+// window, come back — the same songs, the same order.
+struct SavedMix {
+	base::weak_ptr<Main::Session> session;
+	std::vector<FullMsgId> ids;
+};
+
+[[nodiscard]] SavedMix &LastMix() {
+	static auto result = SavedMix();
+	return result;
+}
 
 } // namespace
 
@@ -1792,11 +1805,41 @@ void Show(not_null<Window::SessionController*> controller) {
 			}));
 		};
 
+		const auto showMix = [=](std::vector<FullMsgId> ids) {
+			content->clear();
+			addStatus(Utf("Похожая музыка на ту, что ты слушаешь. "
+				"«+» — к себе в плейлист, «👎» — больше не показывать."));
+			if (!addFoundRows(ids, true)) {
+				addStatus(Utf("Песни этого микса уже недоступны — собери новый."));
+			}
+			box->clearButtons();
+			box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
+				crl::on_main(box, [=] { nav->home(); });
+			});
+			box->addButton(rpl::single(Utf("Новый микс")), [=] {
+				crl::on_main(box, [=] {
+					nav->mixFresh = true;
+					nav->mix();
+				});
+			});
+			box->addButton(rpl::single(Utf("▶ Слушать микс")), [=] {
+				Playlists::PlayQueue(session, ids, 0);
+			});
+		};
+
 		nav->mix = [=] {
 			nav->kind = ViewKind::Mix;
 			const auto generation = ++nav->generation;
 			*title = Utf("Мой микс");
 			content->clear();
+			const auto fresh = base::take(nav->mixFresh);
+			const auto &saved = LastMix();
+			if (!fresh
+				&& saved.session.get() == session.get()
+				&& !saved.ids.empty()) {
+				showMix(saved.ids);
+				return;
+			}
 			const auto status = addStatus(Utf("Подбираю музыку, похожую на твою…"));
 			setBackButtons();
 			BuildMix(session, crl::guard(box, [=](
@@ -1805,23 +1848,14 @@ void Show(not_null<Window::SessionController*> controller) {
 				if (nav->generation != generation || nav->kind != ViewKind::Mix) {
 					return;
 				}
-				if (!addFoundRows(ids, true)) {
+				if (ids.empty()) {
 					status->setText(hadArtists
 						? Utf("Музыкальный поиск Telegram сейчас не ответил. Попробуй ещё раз.")
 						: Utf("Добавь песни в плейлисты или включи песню — микс подберётся по ним."));
 					return;
 				}
-				status->setText(Utf("Похожие исполнители на тех, кого ты слушаешь. Каждый раз новый микс."));
-				box->clearButtons();
-				box->addLeftButton(rpl::single(Utf("← Назад")), [=] {
-					crl::on_main(box, [=] { nav->home(); });
-				});
-				box->addButton(rpl::single(Utf("Ещё микс")), [=] {
-					crl::on_main(box, [=] { nav->mix(); });
-				});
-				box->addButton(rpl::single(Utf("Слушать")), [=] {
-					Playlists::PlayQueue(session, ids, 0);
-				});
+				LastMix() = SavedMix{ base::make_weak(session), ids };
+				showMix(std::move(ids));
 			}));
 		};
 

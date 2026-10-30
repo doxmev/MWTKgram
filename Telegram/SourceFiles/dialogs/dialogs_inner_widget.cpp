@@ -6223,7 +6223,13 @@ void InnerWidget::repaintDialogRowCornerStatus(not_null<History*> history) {
 		RowDescriptor(
 			history,
 			FullMsgId()),
-		updateRect.united(ttlUpdateRect),
+		updateRect.united(ttlUpdateRect).united(
+			// MWTKgram: the glowing ring goes all around the userpic.
+			QRect(0, 0, _st->photoSize, _st->photoSize).marginsAdded(
+				{ skip.x() + size, skip.y() + size, skip.x() + size, skip.y() + size }
+			).translated(
+				st::defaultDialogRow.padding.left(),
+				st::defaultDialogRow.padding.top())),
 		UpdateRowSection::Default | UpdateRowSection::Filtered);
 }
 

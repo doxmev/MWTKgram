@@ -234,7 +234,7 @@ void Load(DocumentData *document) {
 		}
 	}
 	// 3. LRCLIB, unless we recently learned it has nothing.
-	const auto none = CachePath(state.track, u".none2"_q);
+	const auto none = CachePath(state.track, u".none3"_q);
 	if (QFile::exists(none)) {
 		const auto age = QFileInfo(none).lastModified().secsTo(
 			QDateTime::currentDateTime());
@@ -314,7 +314,7 @@ void FinishFetch(
 		if (reached) {
 			// The site answered and has nothing. A network error is not
 			// remembered: next time the song is played we try again.
-			WriteText(CachePath(info, u".none2"_q), QString());
+			WriteText(CachePath(info, u".none3"_q), QString());
 		}
 		SetLines(generation, {});
 		return;
@@ -378,6 +378,118 @@ void FinishFetch(
 	return best.isEmpty() ? best : ScaleLrc(best, bestFactor);
 }
 
+// NetEase Cloud Music: a second big base of synced lyrics, used when
+// LRCLIB has nothing. Two requests: find the song, then its lyrics.
+[[nodiscard]] QNetworkRequest NeteaseRequest(const QUrl &url) {
+	auto request = MakeRequest(url);
+	request.setRawHeader("Referer", "https://music.163.com/");
+	return request;
+}
+
+[[nodiscard]] QString CleanNeteaseLrc(const QString &lrc) {
+	// Credits lines like "[00:00.00] 作词 : …" are not lyrics.
+	static const auto credits = QRegularExpression(
+		u"^\\[[0-9:.]+\\]\\s*(作词|作曲|编曲|制作|混音|母带|和声|吉他|贝斯|鼓|录音|监制|出品|发行|企划|统筹|词|曲)\\s*[:：]"_q);
+	auto result = QStringList();
+	for (const auto &line : lrc.split('\n')) {
+		if (!credits.match(line.trimmed()).hasMatch()) {
+			result.push_back(line);
+		}
+	}
+	return result.join('\n');
+}
+
+void FetchNeteaseLyrics(
+		const TrackInfo &info,
+		int generation,
+		qint64 id,
+		bool reached) {
+	auto &state = Current();
+	auto url = QUrl(u"https://music.163.com/api/song/lyric"_q);
+	auto query = QUrlQuery();
+	query.addQueryItem(u"id"_q, QString::number(id));
+	query.addQueryItem(u"lv"_q, u"1"_q);
+	url.setQuery(query);
+	const auto reply = state.network->get(NeteaseRequest(url));
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		if (Current().generation != generation) {
+			return;
+		}
+		auto lrc = QString();
+		if (reply->error() == QNetworkReply::NoError) {
+			lrc = QJsonDocument::fromJson(reply->readAll()).object().value(
+				u"lrc"_q).toObject().value(u"lyric"_q).toString();
+			lrc = CleanNeteaseLrc(lrc);
+			if (ParseLrc(lrc).empty()) {
+				lrc = QString();
+			}
+		}
+		FinishFetch(info, generation, lrc, reached);
+	});
+}
+
+void SearchNetease(const TrackInfo &info, int generation, bool reached) {
+	auto &state = Current();
+	const auto clean = CleanTitle(info.title);
+	auto url = QUrl(u"https://music.163.com/api/search/get"_q);
+	auto query = QUrlQuery();
+	query.addQueryItem(u"s"_q, (info.performer + ' ' + clean).trimmed());
+	query.addQueryItem(u"type"_q, u"1"_q);
+	query.addQueryItem(u"limit"_q, u"10"_q);
+	url.setQuery(query);
+	const auto reply = state.network->get(NeteaseRequest(url));
+	QObject::connect(reply, &QNetworkReply::finished, [=] {
+		reply->deleteLater();
+		if (Current().generation != generation) {
+			return;
+		}
+		if (reply->error() != QNetworkReply::NoError) {
+			FinishFetch(info, generation, QString(), reached);
+			return;
+		}
+		const auto songs = QJsonDocument::fromJson(
+			reply->readAll()).object().value(
+				u"result"_q).toObject().value(u"songs"_q).toArray();
+		const auto title = clean.toLower();
+		const auto artist = info.performer.trimmed().toLower();
+		const auto duration = info.duration / 1000.;
+		auto bestId = qint64(0);
+		auto bestScore = 1e9;
+		for (const auto &value : songs) {
+			const auto song = value.toObject();
+			const auto name = song.value(u"name"_q).toString().toLower();
+			if (name.isEmpty()
+				|| (!name.contains(title) && !title.contains(name))) {
+				continue;
+			}
+			auto artistMatch = artist.isEmpty();
+			for (const auto &a : song.value(u"artists"_q).toArray()) {
+				const auto who = a.toObject().value(u"name"_q).toString().toLower();
+				if (!who.isEmpty()
+					&& (who.contains(artist) || artist.contains(who))) {
+					artistMatch = true;
+				}
+			}
+			const auto d = song.value(u"duration"_q).toDouble() / 1000.;
+			if (duration > 0. && d > 0. && std::abs(d - duration) > 6.) {
+				continue;
+			}
+			const auto score = (artistMatch ? 0. : 40.)
+				+ ((duration > 0. && d > 0.) ? std::abs(d - duration) : 10.);
+			if (score < bestScore) {
+				bestScore = score;
+				bestId = qint64(song.value(u"id"_q).toDouble());
+			}
+		}
+		if (!bestId) {
+			FinishFetch(info, generation, QString(), true);
+			return;
+		}
+		FetchNeteaseLyrics(info, generation, bestId, true);
+	});
+}
+
 // Three searches, from the most exact to the widest.
 void Search(const TrackInfo &info, int generation, int step, bool reached) {
 	auto &state = Current();
@@ -409,6 +521,9 @@ void Search(const TrackInfo &info, int generation, int step, bool reached) {
 		}
 		if (lrc.isEmpty() && step < 2) {
 			Search(info, generation, step + 1, answered);
+			return;
+		} else if (lrc.isEmpty()) {
+			SearchNetease(info, generation, answered);
 			return;
 		}
 		FinishFetch(info, generation, lrc, answered);
@@ -1991,7 +2106,7 @@ void ShowSyncEditor(not_null<Window::SessionController*> controller) {
 				return;
 			}
 			WriteText(CachePath(track, u".lrc"_q), parsed.lrc);
-			QFile::remove(CachePath(track, u".none2"_q));
+			QFile::remove(CachePath(track, u".none3"_q));
 			if (Current().track.key == track.key) {
 				Load(track.document);
 			}
@@ -2068,7 +2183,7 @@ void ShowSearchBox(not_null<Window::SessionController*> controller) {
 				}
 			}
 			WriteText(CachePath(track, u".lrc"_q), lrc);
-			QFile::remove(CachePath(track, u".none2"_q));
+			QFile::remove(CachePath(track, u".none3"_q));
 			if (Current().track.key == track.key) {
 				Load(track.document);
 			}

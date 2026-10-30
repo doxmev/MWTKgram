@@ -490,7 +490,9 @@ void Row::updateCornerBadgeShown(
 		return kNoneLayer;
 	}();
 	setCornerBadgeShown(nextLayer, std::move(updateCallback));
-	if ((nextLayer == kTopLayer) && user) {
+	// MWTKgram: the glowing ring and other online marks are drawn even
+	// without the dot, so the row must hear when the user goes offline.
+	if (user && Data::IsUserOnline(user, now)) {
 		peer->owner().watchForOffline(user, now);
 	}
 }
